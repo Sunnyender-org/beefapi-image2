@@ -31,7 +31,7 @@ import {
   resolveImageRequest,
 } from "./resolve-image-request.mjs";
 
-const VERSION = "0.3.0";
+const VERSION = "0.3.1";
 const PRODUCT = "beefapi-codex-image2";
 const MODEL = DEFAULT_MODEL;
 const DEFAULT_BASE_URL = "https://beefapi.com/v1";
@@ -409,7 +409,7 @@ function resolveCredential() {
   const fromCodex = credentialFromCodex();
   if (fromCodex) return fromCodex;
   fail(
-    "No BeefAPI key found. Codex needs [model_providers.beefapi] in config.toml plus OPENAI_API_KEY in auth.json, or run beefapi-image2 setup.",
+    "No BeefAPI key. Ask the user for a gpt-plus or gpt-pro key that can use gpt-image-2, then run setup --api-key <key>.",
   );
 }
 
@@ -471,7 +471,7 @@ async function listModels({ apiKey, baseUrl }) {
 }
 
 const GPT_IMAGE_KEY_HINT =
-  "This BeefAPI key cannot use gpt-image-2. Ask the user to create a gpt-plus or gpt-pro token that includes gpt-image-2, then run `node <skill-dir>/scripts/beefapi-image2.mjs setup` locally with that key. Do not ask them to paste the key in chat.";
+  "This key cannot use gpt-image-2. Ask the user for a gpt-plus or gpt-pro key, then run setup --api-key <key>.";
 
 async function checkModel({ apiKey, baseUrl }) {
   const models = await listModels({ apiKey, baseUrl });
@@ -485,15 +485,17 @@ function requireModelAccess(models, model) {
   if (models.includes(model)) return;
   if (model === MODEL_FIREFLY) {
     fail(
-      "This BeefAPI key cannot use gpt-image-2-firefly. Ask the user for a gpt-plus or gpt-pro token that includes gpt-image-2-firefly, then run setup locally. Or retry with --model gpt-image-2. Do not ask them to paste the key in chat.",
+      "This key cannot use gpt-image-2-firefly. Ask for a gpt-plus or gpt-pro key and run setup --api-key, or retry with --model gpt-image-2.",
     );
   }
   fail(GPT_IMAGE_KEY_HINT);
 }
 
 async function commandSetup(options) {
+  const flagKey = String(options["api-key"] || "").trim();
   const envKey = process.env.BEEFAPI_IMAGE2_API_KEY?.trim();
   const apiKey =
+    flagKey ||
     envKey ||
     (options["api-key-stdin"]
       ? await readAllStdin()
@@ -1065,13 +1067,14 @@ function printHelp() {
   console.log(`BeefAPI Image2 ${VERSION}
 
 Usage:
-  beefapi-image2 setup [--skip-check]
+  beefapi-image2 setup [--api-key <key>] [--skip-check]
   beefapi-image2 doctor [--offline]
   beefapi-image2 generate --prompt <text> [--out <file>]
   beefapi-image2 edit --image <file> --prompt <text> [--out <file>]
   beefapi-image2 uninstall [--purge-credentials] [--force]
 
-Uses Codex BeefAPI config.toml + auth.json when present. setup is optional.
+Need a BeefAPI key that can see gpt-image-2. Codex BeefAPI keys work as-is.
+Otherwise: setup --api-key <key>
 
 Image options:
   --n 1

@@ -10,16 +10,15 @@ re-implement that table in this file or in `SKILL.md`.
 ## Setup and health
 
 ```bash
-beefapi-image2 setup
+beefapi-image2 setup --api-key <key>
 beefapi-image2 doctor
 beefapi-image2 doctor --offline
 ```
 
-Generate and edit first look for a Codex BeefAPI key
-(`[model_providers.beefapi]` + `auth.json` `OPENAI_API_KEY`). `setup` is only
-needed when Codex is not already on BeefAPI. It stores a dedicated override
-outside the skill tree, validates `/v1/models` for `gpt-image-2`, and does not
-create an image.
+Need a BeefAPI key that can see `gpt-image-2`. Generate/edit reuse a Codex
+BeefAPI key (`[model_providers.beefapi]` + `auth.json`) when it can. If it
+cannot, run `setup --api-key` with a `gpt-plus` / `gpt-pro` key. Setup stores
+a dedicated override, checks `/v1/models`, and does not create an image.
 `--offline` verifies package, state, and credential permissions without a
 network request. `doctor` warns when `gpt-image-2-firefly` is missing; 淘系
 and 2K/4K jobs need that model.

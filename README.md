@@ -17,14 +17,11 @@ git clone https://github.com/Sunnyender-org/beefapi-image2.git ~/.codex/skills/b
 If the agent's BeefAPI key can already see `gpt-image-2` (usually a
 `gpt-plus` / `gpt-pro` token), no extra setup is required.
 
-If that key is Claude / Kimi / Grok and cannot draw, create a gpt-group
-token in BeefAPI and run:
+Otherwise give the agent a gpt-group token:
 
 ```bash
-node ~/.codex/skills/beefapi-image2/scripts/beefapi-image2.mjs setup
+node ~/.codex/skills/beefapi-image2/scripts/beefapi-image2.mjs setup --api-key sk-...
 ```
-
-Do not paste the key into chat.
 
 Update with `git -C ~/.codex/skills/beefapi-image2 pull`.
 

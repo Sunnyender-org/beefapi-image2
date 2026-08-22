@@ -160,6 +160,26 @@ test("setup validates the model, stores a private credential, and never prints t
   assert.equal(modelRequest.headers.authorization, `Bearer ${apiKey}`);
 });
 
+test("setup accepts --api-key without env and does not print it", async () => {
+  const isolated = path.join(fixtureRoot, "flag-key-config");
+  mkdirSync(isolated, { recursive: true });
+  const flagKey = "sk-flag-image2-key";
+  const beforeCount = requests.length;
+  const result = await run(["setup", "--api-key", flagKey], {
+    withKey: false,
+    configDir: isolated,
+  });
+  assert.doesNotMatch(result.stdout + result.stderr, new RegExp(flagKey));
+  const credential = JSON.parse(
+    readFileSync(path.join(isolated, "image2.credentials.json"), "utf8"),
+  );
+  assert.equal(credential.api_key, flagKey);
+  const modelRequest = requests.slice(beforeCount).find(
+    (request) => request.url === "/v1/models",
+  );
+  assert.equal(modelRequest.headers.authorization, `Bearer ${flagKey}`);
+});
+
 test("generate enforces model/n=1 and writes b64_json output", async () => {
   const out = path.join(fixtureRoot, "generated.png");
   await run([
