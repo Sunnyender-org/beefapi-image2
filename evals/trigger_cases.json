@@ -1,0 +1,54 @@
+{
+  "should_trigger": [
+    {
+      "text": "帮我画一张透明玻璃质感的机械小龙虾，白底。",
+      "family": "generate_cn"
+    },
+    {
+      "text": "Generate a polished hero image for this landing page.",
+      "family": "generate_en"
+    },
+    {
+      "text": "把我上传的产品图背景换成暖灰色，商品本身不要变。",
+      "family": "edit_cn"
+    },
+    {
+      "text": "Create an image with BeefAPI Image2.",
+      "family": "explicit_beefapi_en"
+    },
+    {
+      "text": "帮我出一张淘系 1440 方图，白底产品主图。",
+      "family": "generate_taobao_cn"
+    }
+  ],
+  "should_not_trigger": [
+    {
+      "text": "帮我搜索几张故宫的照片。",
+      "family": "image_search_cn"
+    },
+    {
+      "text": "看看这张图片里写了什么。",
+      "family": "image_inspection_cn"
+    },
+    {
+      "text": "解释 OpenAI Images API 的 response_format。",
+      "family": "api_explanation_cn"
+    },
+    {
+      "text": "把这个 PNG 文件压缩一下，不要调用外部模型。",
+      "family": "local_transform_cn"
+    }
+  ],
+  "near_neighbors": [
+    {
+      "text": "找一张适合做网页背景的免费图库图片。",
+      "expected_route": "image or web search",
+      "reason": "The user wants retrieval, not generation."
+    },
+    {
+      "text": "分析这张图的构图问题。",
+      "expected_route": "image inspection",
+      "reason": "No generation or edit was requested."
+    }
+  ]
+}

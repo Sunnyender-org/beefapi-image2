@@ -1,0 +1,16 @@
+{
+  "name": "beefapi-image2",
+  "version": "0.2.0",
+  "private": true,
+  "description": "BeefAPI Image2 Codex skill and CLI for natural-language image generation",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "build": "node build-installers.mjs",
+    "check": "node --check installer.mjs && node --check scripts/beefapi-image2.mjs && node --check scripts/resolve-image-request.mjs && node build-installers.mjs --check"
+  }
+}

@@ -1,0 +1,17 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test --test-concurrency=1 tests/*.test.mjs
+        env:
+          FORCE_COLOR: "0"
+      - run: node build-installers.mjs --check

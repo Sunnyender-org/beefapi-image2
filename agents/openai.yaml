@@ -1,0 +1,4 @@
+interface:
+  display_name: "BeefAPI Image2"
+  short_description: "Generate and edit images with BeefAPI Image2"
+  default_prompt: "Generate or edit the requested image through BeefAPI Image2 and return the verified output path."
