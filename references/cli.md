@@ -15,8 +15,11 @@ beefapi-image2 doctor
 beefapi-image2 doctor --offline
 ```
 
-`setup` reads the key without echoing it and stores it outside the skill tree.
-It validates `/v1/models` for `gpt-image-2` but does not create an image.
+Generate and edit first look for a Codex BeefAPI key
+(`[model_providers.beefapi]` + `auth.json` `OPENAI_API_KEY`). `setup` is only
+needed when Codex is not already on BeefAPI. It stores a dedicated override
+outside the skill tree, validates `/v1/models` for `gpt-image-2`, and does not
+create an image.
 `--offline` verifies package, state, and credential permissions without a
 network request. `doctor` warns when `gpt-image-2-firefly` is missing; 淘系
 and 2K/4K jobs need that model.

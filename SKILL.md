@@ -25,8 +25,10 @@ without requiring the user to say `BeefAPI` or a model name.
 - Keep `n=1`.
 - Do not modify Codex's text model, `config.toml`, `auth.json`, plugins, MCPs,
   or global `OPENAI_API_KEY`.
-- Do not ask the user to paste an API key into chat. If setup is missing, ask
-  them to run `beefapi-image2 setup` locally.
+- Use the user's existing Codex BeefAPI key: `config.toml`
+  `[model_providers.beefapi]` plus `auth.json` `OPENAI_API_KEY`. Do not ask
+  them to paste a key in chat. Only suggest `beefapi-image2 setup` if Codex
+  has no BeefAPI provider/key.
 
 ## Workflow
 
@@ -78,8 +80,9 @@ both `b64_json` and signed `url` responses by default. See
 
 ## Failure handling
 
-- Missing setup: tell the user to run the installer or
-  `beefapi-image2 setup`; never request the key in chat.
+- Missing BeefAPI key: tell the user to keep Codex on BeefAPI
+  (`config.toml` + `auth.json`). Only suggest `beefapi-image2 setup` when
+  Codex has no BeefAPI provider; never request the key in chat.
 - `401`: explain that the dedicated Image2 token is invalid/expired and should
   be rotated locally.
 - `404` or `model_not_found`: ask the user to confirm the token group includes

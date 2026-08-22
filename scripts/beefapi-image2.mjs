@@ -31,7 +31,7 @@ import {
   resolveImageRequest,
 } from "./resolve-image-request.mjs";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 const PRODUCT = "beefapi-codex-image2";
 const MODEL = DEFAULT_MODEL;
 const DEFAULT_BASE_URL = "https://beefapi.com/v1";
@@ -271,6 +271,69 @@ async function readSecret(promptText) {
   });
 }
 
+function unquoteToml(raw) {
+  const value = String(raw).trim();
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return value;
+}
+
+function parseTomlTables(text) {
+  const root = {};
+  const tables = {};
+  let current = null;
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, "").trim();
+    if (!line) continue;
+    const header = line.match(/^\[([^\]]+)\]$/);
+    if (header) {
+      current = header[1].trim();
+      tables[current] ||= {};
+      continue;
+    }
+    const kv = line.match(/^([A-Za-z0-9._-]+)\s*=\s*(.+)$/);
+    if (!kv) continue;
+    if (current) tables[current][kv[1]] = unquoteToml(kv[2]);
+    else root[kv[1]] = unquoteToml(kv[2]);
+  }
+  return { root, tables };
+}
+
+function isBeefApiProvider(id, table = {}) {
+  const name = String(table.name || id || "").toLowerCase();
+  if (name.includes("beefapi")) return true;
+  try {
+    const host = new URL(String(table.base_url || "")).hostname.toLowerCase();
+    return host === "beefapi.com" || host.endsWith(".beefapi.com");
+  } catch {
+    return false;
+  }
+}
+
+function readAuthJson(filePath) {
+  if (!existsSync(filePath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function keyFromEnvName(name, auth) {
+  if (!name) return "";
+  const fromEnv = process.env[name]?.trim();
+  if (fromEnv) return fromEnv;
+  const fromAuth = auth[name];
+  return typeof fromAuth === "string" ? fromAuth.trim() : "";
+}
+
 function credentialFromDisk() {
   const filePath = paths().credentials;
   const parsed = readJson(filePath, "Credential file");
@@ -286,7 +349,68 @@ function credentialFromDisk() {
     ),
     model: MODEL,
     filePath,
+    source: "file",
   };
+}
+
+function credentialFromCodex() {
+  const p = paths();
+  const configPath = path.join(p.codexHome, "config.toml");
+  if (!existsSync(configPath)) return null;
+  const { root, tables } = parseTomlTables(readFileSync(configPath, "utf8"));
+  const providers = Object.entries(tables)
+    .filter(([id]) => id.startsWith("model_providers."))
+    .map(([id, table]) => ({
+      id: id.slice("model_providers.".length),
+      table,
+    }));
+  const preferred = String(root.model_provider || "").trim();
+  const match =
+    providers.find(
+      (item) => item.id === preferred && isBeefApiProvider(item.id, item.table),
+    ) || providers.find((item) => isBeefApiProvider(item.id, item.table));
+  if (!match) return null;
+  const auth = readAuthJson(path.join(p.codexHome, "auth.json"));
+  const envKey =
+    typeof match.table.env_key === "string" && match.table.env_key
+      ? match.table.env_key
+      : "OPENAI_API_KEY";
+  const apiKey =
+    keyFromEnvName(envKey, auth) || keyFromEnvName("OPENAI_API_KEY", auth);
+  if (!apiKey) return null;
+  return {
+    apiKey,
+    baseUrl: normalizeBaseUrl(
+      process.env.BEEFAPI_IMAGE2_BASE_URL ||
+        match.table.base_url ||
+        DEFAULT_BASE_URL,
+    ),
+    model: MODEL,
+    filePath: path.join(p.codexHome, "auth.json"),
+    source: "codex",
+    provider: match.id,
+  };
+}
+
+function resolveCredential() {
+  const envKey = process.env.BEEFAPI_IMAGE2_API_KEY?.trim();
+  if (envKey) {
+    return {
+      apiKey: envKey,
+      baseUrl: normalizeBaseUrl(
+        process.env.BEEFAPI_IMAGE2_BASE_URL || DEFAULT_BASE_URL,
+      ),
+      model: MODEL,
+      filePath: "env:BEEFAPI_IMAGE2_API_KEY",
+      source: "env",
+    };
+  }
+  if (existsSync(paths().credentials)) return credentialFromDisk();
+  const fromCodex = credentialFromCodex();
+  if (fromCodex) return fromCodex;
+  fail(
+    "No BeefAPI key found. Codex needs [model_providers.beefapi] in config.toml plus OPENAI_API_KEY in auth.json, or run beefapi-image2 setup.",
+  );
 }
 
 function redact(value, secret) {
@@ -454,10 +578,9 @@ async function commandDoctor(options) {
     `Skill installed: ${p.skillDir}`,
   );
 
-  let marker;
   if (existsSync(path.join(p.skillDir, MANAGED_MARKER))) {
     try {
-      marker = JSON.parse(
+      const marker = JSON.parse(
         readFileSync(path.join(p.skillDir, MANAGED_MARKER), "utf8"),
       );
       add(marker.product === PRODUCT, "Skill ownership marker");
@@ -469,11 +592,15 @@ async function commandDoctor(options) {
       add(false, "Managed skill checksum");
     }
   } else {
-    add(false, "Skill ownership marker");
+    add(false, "Installer ownership marker", true);
   }
 
-  add(existsSync(p.state), `Install state: ${p.state}`);
-  add(existsSync(p.credentials), `Credential file: ${p.credentials}`);
+  add(existsSync(p.state), `Install state: ${p.state}`, true);
+  add(
+    existsSync(p.credentials),
+    `Dedicated credential file: ${p.credentials}`,
+    true,
+  );
   if (existsSync(p.credentials)) {
     add(
       permissionsArePrivate(p.credentials),
@@ -482,17 +609,15 @@ async function commandDoctor(options) {
   }
 
   let credential;
-  if (existsSync(p.credentials)) {
-    try {
-      credential = credentialFromDisk();
-      add(
-        Boolean(credential.apiKey),
-        "Credential parses without exposing the key",
-      );
-    } catch (error) {
-      if (error.message !== "__BEEFAPI_IMAGE2_HANDLED__") throw error;
-      add(false, "Credential parses without exposing the key");
-    }
+  try {
+    credential = resolveCredential();
+    add(
+      Boolean(credential.apiKey),
+      `BeefAPI key from ${credential.source} (not printed)`,
+    );
+  } catch (error) {
+    if (error.message !== "__BEEFAPI_IMAGE2_HANDLED__") throw error;
+    add(false, "BeefAPI key from Codex auth.json or Image2 setup");
   }
 
   if (!options.offline && credential) {
@@ -728,11 +853,11 @@ async function commandGenerate(options) {
     );
     return;
   }
-  const credential = credentialFromDisk();
+  const credential = resolveCredential();
   const models = await listModels(credential);
   requireModelAccess(models, plan.model);
   info(
-    `Generating one ${plan.model} image at ${plan.size}${plan.targetSize ? ` (target ${plan.targetSize})` : ""}; this consumes BeefAPI quota and may take a couple of minutes…`,
+    `Generating one ${plan.model} image at ${plan.size}${plan.targetSize ? ` (target ${plan.targetSize})` : ""} via ${credential.source}; this consumes BeefAPI quota and may take a couple of minutes…`,
   );
   if (plan.warning) info(plan.warning);
   const result = await callImageApi("/images/generations", payload, credential);
@@ -834,11 +959,11 @@ async function commandEdit(options) {
       path.basename(mask.absolute),
     );
 
-  const credential = credentialFromDisk();
+  const credential = resolveCredential();
   const models = await listModels(credential);
   requireModelAccess(models, plan.model);
   info(
-    `Editing one ${plan.model} image at ${plan.size}${plan.targetSize ? ` (target ${plan.targetSize})` : ""}; this consumes BeefAPI quota and may take a couple of minutes…`,
+    `Editing one ${plan.model} image at ${plan.size}${plan.targetSize ? ` (target ${plan.targetSize})` : ""} via ${credential.source}; this consumes BeefAPI quota and may take a couple of minutes…`,
   );
   if (plan.warning) info(plan.warning);
   const result = await callImageApi("/images/edits", form, credential, true);
@@ -944,6 +1069,8 @@ Usage:
   beefapi-image2 generate --prompt <text> [--out <file>]
   beefapi-image2 edit --image <file> --prompt <text> [--out <file>]
   beefapi-image2 uninstall [--purge-credentials] [--force]
+
+Uses Codex BeefAPI config.toml + auth.json when present. setup is optional.
 
 Image options:
   --n 1

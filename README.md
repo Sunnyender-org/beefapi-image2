@@ -12,11 +12,14 @@ Node 18+. Clone into the Codex skills directory, then set up the key:
 
 ```bash
 git clone https://github.com/Sunnyender-org/beefapi-image2.git ~/.codex/skills/beefapi-image2
-cd ~/.codex/skills/beefapi-image2
-node scripts/beefapi-image2.mjs setup
 ```
 
-Restart Codex. Update with `git -C ~/.codex/skills/beefapi-image2 pull`.
+If Codex already uses BeefAPI (`config.toml` `[model_providers.beefapi]` and
+`auth.json` `OPENAI_API_KEY`), no extra setup is required. Restart Codex.
+
+Otherwise run `node ~/.codex/skills/beefapi-image2/scripts/beefapi-image2.mjs setup`.
+
+Update with `git -C ~/.codex/skills/beefapi-image2 pull`.
 
 Optional one-file installer (same skill, plus a `beefapi-image2` command):
 

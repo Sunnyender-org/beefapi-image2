@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -275,6 +276,47 @@ test("dry-run needs no credential and n>1 fails before any network call", async 
   assert.equal(requests.length, beforeCount);
 });
 
+test("generate uses Codex BeefAPI auth.json without a dedicated setup file", async () => {
+  const isolatedCodex = path.join(fixtureRoot, "codex-beefapi");
+  mkdirSync(isolatedCodex, { recursive: true });
+  writeFileSync(
+    path.join(isolatedCodex, "config.toml"),
+    [
+      'model_provider = "beefapi"',
+      "",
+      "[model_providers.beefapi]",
+      'name = "beefapi"',
+      'base_url = "https://beefapi.com/v1"',
+      'wire_api = "responses"',
+      "requires_openai_auth = true",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    path.join(isolatedCodex, "auth.json"),
+    `${JSON.stringify({ OPENAI_API_KEY: apiKey })}\n`,
+  );
+  const isolated = path.join(fixtureRoot, "codex-only-config");
+  mkdirSync(isolated, { recursive: true });
+  const out = path.join(fixtureRoot, "from-codex.png");
+  const beforeCount = requests.length;
+  await run(
+    ["generate", "--prompt", "codex key", "--out", out, "--response-format", "b64_json"],
+    {
+      withKey: false,
+      configDir: isolated,
+      env: { CODEX_HOME: isolatedCodex },
+    },
+  );
+  assert.equal(existsSync(path.join(isolated, "image2.credentials.json")), false);
+  const request = requests.slice(beforeCount).find(
+    (item) => item.url === "/v1/images/generations",
+  );
+  assert.equal(request.headers.authorization, `Bearer ${apiKey}`);
+  const payload = JSON.parse(request.body.toString("utf8"));
+  assert.equal(payload.model, "gpt-image-2");
+});
+
 test("invalid JSON and missing credentials fail clearly without leaking secrets", async () => {
   const isolated = path.join(fixtureRoot, "isolated-config");
   mkdirSync(isolated, { recursive: true });
@@ -283,7 +325,7 @@ test("invalid JSON and missing credentials fail clearly without leaking secrets"
     withKey: false,
   });
   assert.equal(missing.status, 1);
-  assert.match(missing.stdout, /FAIL  Credential file/);
+  assert.match(missing.stdout, /FAIL {2}BeefAPI key/);
   assert.doesNotMatch(missing.stdout + missing.stderr, /sk-test/);
 
   const badConfig = path.join(fixtureRoot, "bad-json-config");

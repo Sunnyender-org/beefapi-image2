@@ -28,7 +28,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 const PRODUCT = "beefapi-codex-image2";
 const MANAGED_MARKER = ".beefapi-image2-managed.json";
 const PAYLOAD = __BEEFAPI_IMAGE2_PAYLOAD__;
