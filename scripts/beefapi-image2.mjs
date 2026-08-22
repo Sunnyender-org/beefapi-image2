@@ -470,12 +470,13 @@ async function listModels({ apiKey, baseUrl }) {
     : [];
 }
 
+const GPT_IMAGE_KEY_HINT =
+  "This BeefAPI key cannot use gpt-image-2. Ask the user to create a gpt-plus or gpt-pro token that includes gpt-image-2, then run `node <skill-dir>/scripts/beefapi-image2.mjs setup` locally with that key. Do not ask them to paste the key in chat.";
+
 async function checkModel({ apiKey, baseUrl }) {
   const models = await listModels({ apiKey, baseUrl });
   if (!models.includes(MODEL_GPT_IMAGE_2)) {
-    fail(
-      `The token cannot access ${MODEL_GPT_IMAGE_2}. Use a gpt-plus or gpt-pro token.`,
-    );
+    fail(GPT_IMAGE_KEY_HINT);
   }
   return models;
 }
@@ -484,10 +485,10 @@ function requireModelAccess(models, model) {
   if (models.includes(model)) return;
   if (model === MODEL_FIREFLY) {
     fail(
-      `The token cannot access ${MODEL_FIREFLY}. Use a gpt-plus or gpt-pro token that includes firefly, or pass --model gpt-image-2.`,
+      "This BeefAPI key cannot use gpt-image-2-firefly. Ask the user for a gpt-plus or gpt-pro token that includes gpt-image-2-firefly, then run setup locally. Or retry with --model gpt-image-2. Do not ask them to paste the key in chat.",
     );
   }
-  fail(`The token cannot access ${model}.`);
+  fail(GPT_IMAGE_KEY_HINT);
 }
 
 async function commandSetup(options) {

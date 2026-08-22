@@ -25,10 +25,14 @@ without requiring the user to say `BeefAPI` or a model name.
 - Keep `n=1`.
 - Do not modify Codex's text model, `config.toml`, `auth.json`, plugins, MCPs,
   or global `OPENAI_API_KEY`.
-- Use the user's existing Codex BeefAPI key: `config.toml`
-  `[model_providers.beefapi]` plus `auth.json` `OPENAI_API_KEY`. Do not ask
-  them to paste a key in chat. Only suggest `beefapi-image2 setup` if Codex
-  has no BeefAPI provider/key.
+- Prefer the agent's existing BeefAPI key (Codex: `config.toml`
+  `[model_providers.beefapi]` + `auth.json` `OPENAI_API_KEY`).
+- If that key's `/v1/models` includes `gpt-image-2`, use it.
+- If it does not (often a Claude/Kimi/Grok group key), tell the user to
+  create a `gpt-plus` or `gpt-pro` token that can see `gpt-image-2`, then
+  run `node <skill-dir>/scripts/beefapi-image2.mjs setup` locally. Never
+  ask them to paste the key in chat. Do not modify `config.toml` or
+  `auth.json`.
 
 ## Workflow
 
@@ -80,14 +84,14 @@ both `b64_json` and signed `url` responses by default. See
 
 ## Failure handling
 
-- Missing BeefAPI key: tell the user to keep Codex on BeefAPI
-  (`config.toml` + `auth.json`). Only suggest `beefapi-image2 setup` when
-  Codex has no BeefAPI provider; never request the key in chat.
-- `401`: explain that the dedicated Image2 token is invalid/expired and should
-  be rotated locally.
-- `404` or `model_not_found`: ask the user to confirm the token group includes
-  `gpt-image-2` (`gpt-plus` or `gpt-pro`). For firefly jobs, the token must
-  also see `gpt-image-2-firefly`.
+- Missing BeefAPI key, or `/v1/models` has no `gpt-image-2`: tell the user
+  this Agent's current key cannot draw. They need a BeefAPI `gpt-plus` /
+  `gpt-pro` token that lists `gpt-image-2`. Point them to console → 令牌 →
+  一键接入 Image2, then `beefapi-image2 setup` on their machine. Never
+  request the key in chat.
+- `401`: the key is invalid/expired; rotate it locally with setup.
+- Firefly 404: the gpt token must also see `gpt-image-2-firefly`, or retry
+  with `--model gpt-image-2`.
 - Network/sandbox denial: report it explicitly and request network permission;
   do not claim the image was generated.
 - Empty or unsupported response: preserve the error, do not fabricate an
