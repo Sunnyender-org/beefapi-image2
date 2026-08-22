@@ -64,6 +64,18 @@ test("explicit 1024x1024 stays on gpt-image-2", () => {
   assert.equal(plan.size, "1024x1024");
 });
 
+test("2K without a ratio uses firefly square", () => {
+  const plan = resolveImageRequest({ prompt: "出一张2K的猫，产品摄影" });
+  assert.equal(plan.model, MODEL_FIREFLY);
+  assert.equal(plan.size, "2048x2048");
+});
+
+test("4K 16:9 uses firefly native 4K", () => {
+  const plan = resolveImageRequest({ prompt: "4K 16:9 海报" });
+  assert.equal(plan.model, MODEL_FIREFLY);
+  assert.equal(plan.size, "3840x2160");
+});
+
 test("explicit firefly native size is passed through", () => {
   const plan = resolveImageRequest({
     prompt: "wide banner",

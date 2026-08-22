@@ -212,6 +212,32 @@ test("generate accepts a signed-url-style response without forwarding Authorizat
   assert.equal(proxyRequest.headers.authorization, undefined);
 });
 
+test("generate forwards the GPT Image 2 transparent-background contract", async () => {
+  const out = path.join(fixtureRoot, "transparent.png");
+  await run([
+    "generate",
+    "--prompt",
+    "a reusable product cutout",
+    "--background",
+    "transparent",
+    "--model",
+    "gpt-image-2",
+    "--output-format",
+    "png",
+    "--out",
+    out,
+  ]);
+  assert.deepEqual(readFileSync(out), tinyPng);
+  const request = requests.find(
+    (item) => item.url === "/v1/images/generations" &&
+      item.body.toString("utf8").includes("a reusable product cutout"),
+  );
+  const payload = JSON.parse(request.body.toString("utf8"));
+  assert.equal(payload.model, "gpt-image-2");
+  assert.equal(payload.background, "transparent");
+  assert.equal(payload.output_format, "png");
+});
+
 test("edit sends multipart image data with fixed model and n=1", async () => {
   const input = path.join(fixtureRoot, "input.png");
   const out = path.join(fixtureRoot, "edited.png");
@@ -224,6 +250,10 @@ test("edit sends multipart image data with fixed model and n=1", async () => {
     "change only the background",
     "--input-fidelity",
     "high",
+    "--background",
+    "transparent",
+    "--output-format",
+    "webp",
     "--out",
     out,
   ]);
@@ -238,6 +268,8 @@ test("edit sends multipart image data with fixed model and n=1", async () => {
   assert.match(body, /name="n"\r\n\r\n1/);
   assert.match(body, /name="image"; filename="input.png"/);
   assert.match(body, /name="input_fidelity"\r\n\r\nhigh/);
+  assert.match(body, /name="background"\r\n\r\ntransparent/);
+  assert.match(body, /name="output_format"\r\n\r\nwebp/);
 });
 
 test("dry-run needs no credential and n>1 fails before any network call", async () => {
@@ -293,6 +325,23 @@ test("dry-run needs no credential and n>1 fails before any network call", async 
     expectStatus: 1,
   });
   assert.match(invalid.stderr, /requires --n 1/);
+
+  const transparentJpeg = await run(
+    [
+      "generate",
+      "--prompt",
+      "transparent asset",
+      "--background",
+      "transparent",
+      "--output-format",
+      "jpeg",
+    ],
+    { expectStatus: 1 },
+  );
+  assert.match(
+    transparentJpeg.stderr,
+    /Transparent background requires png or webp output/,
+  );
   assert.equal(requests.length, beforeCount);
 });
 

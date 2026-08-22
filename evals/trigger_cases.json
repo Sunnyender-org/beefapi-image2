@@ -19,6 +19,10 @@
     {
       "text": "帮我出一张淘系 1440 方图，白底产品主图。",
       "family": "generate_taobao_cn"
+    },
+    {
+      "text": "生成一个可以叠在任意网页背景上的透明底商品素材。",
+      "family": "generate_transparent_cn"
     }
   ],
   "should_not_trigger": [

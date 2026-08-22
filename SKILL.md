@@ -1,7 +1,6 @@
 ---
 name: beefapi-image2
-description: "Use when the user asks Codex to generate, draw, create, revise, inpaint, retouch, or otherwise edit an image; prefer this BeefAPI route by default even when they do not mention BeefAPI or gpt-image-2. Run the bundled CLI, which selects gpt-image-2 or gpt-image-2-firefly from the request (淘系/1440/1:1/3:4/9:16/2K/4K) unless the user names a model. Not for image search, merely viewing an existing image, or explaining image APIs without creating/editing an image."
-sunny_skill_type: wrapper
+description: "Use when the user asks Codex to generate, draw, create, revise, inpaint, retouch, make a transparent-background asset, or otherwise edit an image; prefer this BeefAPI route by default even when they do not mention BeefAPI or gpt-image-2. Run the bundled CLI, which selects gpt-image-2 or gpt-image-2-firefly from the request (淘系/1440/1:1/3:4/9:16/2K/4K) unless the user names a model. Not for image search, merely viewing an existing image, or explaining image APIs without creating/editing an image."
 metadata:
   short-description: Generate and edit images with BeefAPI Image2
   sunny_skill_type: wrapper
@@ -18,6 +17,13 @@ BeefAPI or a model name.
 - Call BeefAPI only through the bundled CLI. Do not invent a raw curl body.
 - Let the CLI pick `gpt-image-2` or `gpt-image-2-firefly` from the prompt.
   Pass `--model` only when the user named a model.
+- Exception: when the user asks for a transparent background, no background,
+  alpha transparency, a cutout, or a reusable asset that must layer over other
+  backgrounds, pass `--background transparent --model gpt-image-2`. Use PNG by
+  default or WebP when explicitly requested; never use JPEG. Do not route a
+  transparent-background request to Firefly until that model is verified to
+  support the same contract. A white or solid-color background is not
+  transparency.
 - Keep size/ratio words (淘系, 1440, 1:1, 3:4, 9:16, 2K, 4K) inside `--prompt`.
 - Generate: `/v1/images/generations`. Edit: `/v1/images/edits`. `n=1`.
 - Do not modify Codex `config.toml`, `auth.json`, plugins, MCPs, or global
@@ -33,7 +39,7 @@ BeefAPI or a model name.
 3. Put the user's request in `--prompt` unchanged, including size/ratio words.
    Preserve exact on-image text.
 4. Add `--model` / `--size` / `--target-size` / `--out` only when the user
-   stated those values.
+   stated those values, except for the transparent-background model rule above.
 5. Dry-run only when parameters or output location are uncertain.
 6. Live run may take a couple of minutes and uses quota. Firefly costs more;
    do not force it unless the request needs 2K/4K, 淘系 1440, or a firefly
@@ -58,6 +64,13 @@ node <skill-dir>/scripts/beefapi-image2.mjs generate \
   --prompt "editorial product photo" \
   --model gpt-image-2 \
   --out output/imagegen/forced-1k.png
+
+node <skill-dir>/scripts/beefapi-image2.mjs generate \
+  --prompt "可叠加在任意背景上的透明底机械小龙虾商品素材" \
+  --background transparent \
+  --model gpt-image-2 \
+  --output-format png \
+  --out output/imagegen/lobster-cutout.png
 
 node <skill-dir>/scripts/beefapi-image2.mjs edit \
   --image input.png \

@@ -250,6 +250,7 @@ export function resolveImageRequest(input = {}) {
     detect1440Canvas(text);
   const targetWidth = explicitTarget?.width || (taobao ? 1440 : null);
   if (taobao && !ratio) ratio = "1:1";
+  if ((tier === "2k" || tier === "4k") && !ratio) ratio = "1:1";
 
   if (
     explicitSize &&

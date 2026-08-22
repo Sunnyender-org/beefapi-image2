@@ -33,6 +33,13 @@ beefapi-image2 generate \
 beefapi-image2 generate \
   --prompt "淘系主图，1440 方图，白底，logo 200px" \
   --out output/imagegen/taobao.png
+
+beefapi-image2 generate \
+  --prompt "transparent product cutout" \
+  --background transparent \
+  --model gpt-image-2 \
+  --output-format png \
+  --out output/imagegen/product-cutout.png
 ```
 
 Useful options:
@@ -54,6 +61,9 @@ Useful options:
   paid request.
 
 `--n` is accepted only as `--n 1`; larger values fail locally.
+Transparent output is a `gpt-image-2` preview capability: use PNG (default) or
+WebP, never JPEG. The Skill fixes transparent-background requests to
+`gpt-image-2`; do not rely on Firefly for that contract.
 
 Auto selection:
 
@@ -61,7 +71,8 @@ Auto selection:
 - 淘系 / 1440 / 1:1·3:4·9:16 at 1440-wide: `gpt-image-2-firefly` 2K native,
   then local resize to 1440 when `sips` or ImageMagick is available.
 - 2K/4K or firefly-only ratios (16:9, 9:16, 3:4, 4:3, 3:2, 2:3, 5:4, 4:5,
-  21:9): `gpt-image-2-firefly`.
+  21:9): `gpt-image-2-firefly`. A 2K/4K request without a ratio defaults to
+  `1:1`.
 - `--model` always wins.
 
 ## Edit
