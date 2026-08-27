@@ -35,7 +35,7 @@ import {
   resolveImageRequest,
 } from "./resolve-image-request.mjs";
 
-const VERSION = "0.5.0";
+const VERSION = "0.5.1";
 const PRODUCT = "beefapi-codex-image2";
 const MODEL = DEFAULT_MODEL;
 const DEFAULT_BASE_URL = "https://beefapi.com/v1";

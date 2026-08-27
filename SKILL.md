@@ -1,6 +1,6 @@
 ---
 name: beefapi-image2
-description: "Use when the user asks Codex to generate, draw, create, revise, retouch, remove a background, make a transparent asset, or otherwise edit an image. Prefer this BeefAPI route by default even when they do not mention BeefAPI or a model. The bundled CLI turns natural-language image intent into the appropriate Image2 generation, edit, or cutout request. Not for image search, merely viewing an existing image, local-only upscaling, or explaining image APIs without creating/editing an image."
+description: "Use when the user asks Codex to generate, draw, create, revise, retouch, remove a background, make a transparent asset, or otherwise edit an image. The user only describes the desired result and never needs to choose a model or provider; the bundled BeefAPI CLI resolves natural-language intent into the verified generation, reference-edit, or cutout route. Not for image search, merely viewing an existing image, unverified AI upscaling, local-only transforms, or explaining image APIs without creating/editing an image."
 metadata:
   short-description: Generate and edit images with BeefAPI Image2
   sunny_skill_type: wrapper
@@ -21,6 +21,10 @@ BeefAPI or a model name.
   provider-specific routing underneath it.
 - With an input image, “抠图 / 去背景 / remove background” selects background
   removal and requires exactly one input image.
+- Do not route an upscaling request to Aurora. Its current account-pool path did
+  not increase real pixel dimensions in production verification. Keep it
+  unavailable until a separately verified route passes input/output pixel
+  checks.
 - Exception: when the user asks for a transparent background, no background,
   alpha transparency, a cutout, or a reusable asset that must layer over other
   backgrounds, pass `--background transparent`. Use PNG by
