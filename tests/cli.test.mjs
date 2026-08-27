@@ -24,6 +24,7 @@ const tinyPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+Xz4nGQAAAABJRU5ErkJggg==",
   "base64",
 );
+const tinyJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 const requests = [];
 let server;
 let baseUrl;
@@ -97,7 +98,13 @@ before(async () => {
       response.setHeader("Content-Type", "application/json");
       response.end(
         JSON.stringify({
-          data: [{ id: "gpt-image-2" }, { id: "gpt-image-2-firefly" }],
+          data: [
+            { id: "gpt-image-2" },
+            { id: "gpt-image-2-firefly" },
+            { id: "nano-banana-2" },
+            { id: "nano-banana-pro" },
+            { id: "remove-bg" },
+          ],
         }),
       );
       return;
@@ -115,7 +122,12 @@ before(async () => {
           data: [
             payload.prompt === "url-response"
               ? { url: "/v1/images/proxy-test" }
-              : { b64_json: tinyPng.toString("base64") },
+              : {
+                  b64_json: (payload.prompt === "jpeg-response"
+                    ? tinyJpeg
+                    : tinyPng
+                  ).toString("base64"),
+                },
           ],
         }),
       );
@@ -212,6 +224,23 @@ test("generate accepts a signed-url-style response without forwarding Authorizat
   assert.equal(proxyRequest.headers.authorization, undefined);
 });
 
+test("generate corrects a misleading requested extension from actual image bytes", async () => {
+  const requested = path.join(fixtureRoot, "leonardo-output.png");
+  const actual = path.join(fixtureRoot, "leonardo-output.jpg");
+  const result = await run([
+    "generate",
+    "--prompt",
+    "jpeg-response",
+    "--output-format",
+    "png",
+    "--out",
+    requested,
+  ]);
+  assert.equal(existsSync(requested), false);
+  assert.deepEqual(readFileSync(actual), tinyJpeg);
+  assert.match(result.stdout, /returned JPEG; writing .*\.jpg instead/);
+});
+
 test("generate forwards the GPT Image 2 transparent-background contract", async () => {
   const out = path.join(fixtureRoot, "transparent.png");
   await run([
@@ -220,8 +249,6 @@ test("generate forwards the GPT Image 2 transparent-background contract", async 
     "a reusable product cutout",
     "--background",
     "transparent",
-    "--model",
-    "gpt-image-2",
     "--output-format",
     "png",
     "--out",
@@ -270,6 +297,69 @@ test("edit sends multipart image data with fixed model and n=1", async () => {
   assert.match(body, /name="input_fidelity"\r\n\r\nhigh/);
   assert.match(body, /name="background"\r\n\r\ntransparent/);
   assert.match(body, /name="output_format"\r\n\r\nwebp/);
+});
+
+test("utility edit forwards remove-bg parameters from natural language", async () => {
+  const input = path.join(fixtureRoot, "utility-input.png");
+  writeFileSync(input, tinyPng);
+
+  const beforeRemove = requests.length;
+  await run([
+    "edit",
+    "--image",
+    input,
+    "--prompt",
+    "给商品抠图",
+    "--size",
+    "full",
+    "--channels",
+    "alpha",
+    "--foreground-type",
+    "product",
+    "--crop",
+    "true",
+    "--semitransparency",
+    "false",
+    "--shadow-opacity",
+    "35",
+    "--shadow-type",
+    "drop",
+    "--out",
+    path.join(fixtureRoot, "cutout.png"),
+  ]);
+  const removeRequest = requests.slice(beforeRemove).find(
+    (item) => item.url === "/v1/images/edits",
+  );
+  const removeBody = removeRequest.body.toString("latin1");
+  assert.match(removeBody, /name="model"\r\n\r\nremove-bg/);
+  assert.match(removeBody, /name="size"\r\n\r\nfull/);
+  assert.match(removeBody, /name="channels"\r\n\r\nalpha/);
+  assert.match(removeBody, /name="type"\r\n\r\nproduct/);
+  assert.match(removeBody, /name="crop"\r\n\r\ntrue/);
+  assert.match(removeBody, /name="semitransparency"\r\n\r\nfalse/);
+  assert.match(removeBody, /name="shadow_opacity"\r\n\r\n35/);
+  assert.match(removeBody, /name="shadow_type"\r\n\r\ndrop/);
+
+});
+
+test("utility edits require exactly one reference image", async () => {
+  const input = path.join(fixtureRoot, "single-utility-input.png");
+  writeFileSync(input, tinyPng);
+  const result = await run(
+    [
+      "edit",
+      "--image",
+      input,
+      "--image",
+      input,
+      "--prompt",
+      "remove background",
+      "--out",
+      path.join(fixtureRoot, "invalid-cutout.png"),
+    ],
+    { expectStatus: 1 },
+  );
+  assert.match(result.stderr, /requires exactly one --image/);
 });
 
 test("dry-run needs no credential and n>1 fails before any network call", async () => {

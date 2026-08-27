@@ -6,8 +6,19 @@
 
 export const MODEL_GPT_IMAGE_2 = "gpt-image-2";
 export const MODEL_FIREFLY = "gpt-image-2-firefly";
+export const MODEL_NANO_BANANA_2 = "nano-banana-2";
+export const MODEL_NANO_BANANA_PRO = "nano-banana-pro";
+export const MODEL_REMOVE_BG = "remove-bg";
 export const DEFAULT_MODEL = MODEL_GPT_IMAGE_2;
-export const KNOWN_MODELS = [MODEL_GPT_IMAGE_2, MODEL_FIREFLY];
+export const KNOWN_MODELS = [
+  MODEL_GPT_IMAGE_2,
+  MODEL_FIREFLY,
+  MODEL_NANO_BANANA_2,
+  MODEL_NANO_BANANA_PRO,
+  MODEL_REMOVE_BG,
+];
+
+export const UTILITY_MODELS = new Set([MODEL_REMOVE_BG]);
 
 const MODEL_ALIASES = {
   "gpt-image-2": MODEL_GPT_IMAGE_2,
@@ -17,6 +28,15 @@ const MODEL_ALIASES = {
   "image2-firefly": MODEL_FIREFLY,
   "gpt-image2-firefly": MODEL_FIREFLY,
   firefly: MODEL_FIREFLY,
+  "nano-banana-2": MODEL_NANO_BANANA_2,
+  "nano banana 2": MODEL_NANO_BANANA_2,
+  nanobanana2: MODEL_NANO_BANANA_2,
+  "nano-banana-pro": MODEL_NANO_BANANA_PRO,
+  "nano banana pro": MODEL_NANO_BANANA_PRO,
+  nanobananapro: MODEL_NANO_BANANA_PRO,
+  "gemini-image-2": MODEL_NANO_BANANA_PRO,
+  "remove-bg": MODEL_REMOVE_BG,
+  "remove background": MODEL_REMOVE_BG,
 };
 
 // BeefAPI gpt-image-2-firefly native table. Do not invent extra WxH here.
@@ -37,6 +57,21 @@ export const GPT_IMAGE_2_SIZES = {
   "1:1": "1024x1024",
   "3:2": "1536x1024",
   "2:3": "1024x1536",
+};
+
+// Leonardo Nano Banana native pixels. Public model names stay provider-neutral;
+// this table is used only when the caller explicitly names a Nano model.
+export const NANO_BANANA_SIZES = {
+  "21:9": { "1k": "1584x672", "2k": "3168x1344", "4k": "6336x2688" },
+  "16:9": { "1k": "1376x768", "2k": "2752x1536", "4k": "5504x3072" },
+  "3:2": { "1k": "1264x848", "2k": "2528x1696", "4k": "5056x3392" },
+  "4:3": { "1k": "1200x896", "2k": "2400x1792", "4k": "4800x3584" },
+  "5:4": { "1k": "1152x928", "2k": "2304x1856", "4k": "4608x3712" },
+  "1:1": { "1k": "1024x1024", "2k": "2048x2048", "4k": "4096x4096" },
+  "4:5": { "1k": "928x1152", "2k": "1856x2304", "4k": "3712x4608" },
+  "3:4": { "1k": "896x1200", "2k": "1792x2400", "4k": "3584x4800" },
+  "2:3": { "1k": "848x1264", "2k": "1696x2528", "4k": "3392x5056" },
+  "9:16": { "1k": "768x1376", "2k": "1536x2752", "4k": "3072x5504" },
 };
 
 const TAOBAO_TARGETS = {
@@ -102,6 +137,25 @@ export function normalizeModel(value) {
   if (value == null || String(value).trim() === "") return null;
   const key = String(value).trim().toLowerCase();
   return MODEL_ALIASES[key] || null;
+}
+
+function detectNamedModel(text, operation) {
+  const source = String(text || "");
+  if (/nano[\s_-]*banana[\s_-]*pro|gemini[\s_-]*(?:image[\s_-]*)?2/i.test(source)) {
+    return MODEL_NANO_BANANA_PRO;
+  }
+  if (/nano[\s_-]*banana(?:[\s_-]*2)?/i.test(source)) {
+    return MODEL_NANO_BANANA_2;
+  }
+  if (/gpt[\s_-]*image[\s_-]*2[\s_-]*firefly|\bfirefly\b/i.test(source)) {
+    return MODEL_FIREFLY;
+  }
+  if (operation === "edit") {
+    if (/remove[\s_-]*(?:the[\s_-]*)?(?:bg|background)|去(?:除)?背景|抠图/i.test(source)) {
+      return MODEL_REMOVE_BG;
+    }
+  }
+  return null;
 }
 
 function detectRatio(text) {
@@ -206,14 +260,40 @@ export function resolveImageRequest(input = {}) {
   const forcedModel = normalizeModel(input.model);
   if (input.model && !forcedModel) {
     throw planError(
-      `Unknown model: ${input.model}. Use gpt-image-2 or gpt-image-2-firefly.`,
+      `Unknown model: ${input.model}. Use one of: ${KNOWN_MODELS.join(", ")}.`,
     );
+  }
+  const inferredModel = detectNamedModel(prompt, input.operation);
+  const selectedModel = forcedModel || inferredModel;
+
+  if (selectedModel && UTILITY_MODELS.has(selectedModel)) {
+    if (input.operation && input.operation !== "edit") {
+      throw planError(`${selectedModel} is an edit-only model.`);
+    }
+    const rawSize = String(input.size || "").trim().toLowerCase();
+    const size = rawSize || "auto";
+    if (!["auto", "preview", "full", "50mp"].includes(size)) {
+      throw planError("remove-bg size must be auto, preview, full, or 50mp.");
+    }
+    return {
+      model: selectedModel,
+      size,
+      targetSize: null,
+      quality: "auto",
+      background,
+      outputFormat,
+      prompt,
+      originalPrompt: prompt,
+      reason: "remove-bg-edit",
+      selectedBy: forcedModel ? "user-model" : "utility-intent",
+      resize: false,
+    };
   }
 
   const explicitSize = input.size ? parseWxH(input.size) : null;
   if (input.size && String(input.size).trim().toLowerCase() === "auto") {
     return {
-      model: forcedModel || DEFAULT_MODEL,
+      model: selectedModel || DEFAULT_MODEL,
       size: "auto",
       targetSize: null,
       quality,
@@ -222,7 +302,7 @@ export function resolveImageRequest(input = {}) {
       prompt,
       reason: "explicit-auto",
       resize: false,
-      selectedBy: forcedModel ? "user-model" : "default",
+      selectedBy: forcedModel ? "user-model" : inferredModel ? "named-model" : "default",
     };
   }
   if (input.size && !explicitSize && String(input.size).trim().toLowerCase() !== "auto") {
@@ -253,9 +333,37 @@ export function resolveImageRequest(input = {}) {
   if ((tier === "2k" || tier === "4k") && !ratio) ratio = "1:1";
 
   if (
+    selectedModel === MODEL_NANO_BANANA_2 ||
+    selectedModel === MODEL_NANO_BANANA_PRO
+  ) {
+    const nanoRatio = ratio && NANO_BANANA_SIZES[ratio] ? ratio : "1:1";
+    if (ratio && !NANO_BANANA_SIZES[ratio]) {
+      throw planError(
+        `Unsupported Nano Banana ratio ${ratio}. Use one of: ${Object.keys(NANO_BANANA_SIZES).join(", ")}.`,
+      );
+    }
+    const nanoTier = tier || (explicitSize ? nearestNanoTier(explicitSize) : "1k");
+    const nativeSize = NANO_BANANA_SIZES[nanoRatio][nanoTier];
+    return finalizePlan({
+      model: selectedModel,
+      size: nativeSize,
+      targetSize:
+        explicitTarget?.size ||
+        (explicitSize && explicitSize.size !== nativeSize ? explicitSize.size : null),
+      quality,
+      background,
+      outputFormat,
+      prompt,
+      reason: `${selectedModel}-${nanoRatio}-${nanoTier}`,
+      selectedBy: forcedModel ? "user-model" : "named-model",
+      noResize,
+    });
+  }
+
+  if (
     explicitSize &&
     GPT_IMAGE_2_SIZES[ratio] === explicitSize.size &&
-    forcedModel !== MODEL_FIREFLY &&
+    selectedModel !== MODEL_FIREFLY &&
     !taobao
   ) {
     return finalizePlan({
@@ -277,7 +385,7 @@ export function resolveImageRequest(input = {}) {
     const nativeSize = explicitSize.size;
     const targetSize = explicitTarget?.size || null;
     return finalizePlan({
-      model: forcedModel || MODEL_FIREFLY,
+      model: selectedModel || MODEL_FIREFLY,
       size: nativeSize,
       targetSize,
       quality,
@@ -299,7 +407,7 @@ export function resolveImageRequest(input = {}) {
     }
     const targetSize =
       explicitTarget?.size || taobaoTarget(marketplaceRatio, targetWidth || 1440);
-    if (forcedModel === MODEL_GPT_IMAGE_2) {
+    if (selectedModel === MODEL_GPT_IMAGE_2) {
       return finalizePlan({
         model: MODEL_GPT_IMAGE_2,
         size: GPT_IMAGE_2_SIZES[marketplaceRatio] || "1024x1024",
@@ -330,7 +438,7 @@ export function resolveImageRequest(input = {}) {
     });
   }
 
-  if (explicitSize && forcedModel === MODEL_GPT_IMAGE_2) {
+  if (explicitSize && selectedModel === MODEL_GPT_IMAGE_2) {
     return finalizePlan({
       model: MODEL_GPT_IMAGE_2,
       size: explicitSize.size,
@@ -351,7 +459,7 @@ export function resolveImageRequest(input = {}) {
     });
   }
 
-  if (explicitSize && (forcedModel === MODEL_FIREFLY || FIREFLY_SIZES[ratio])) {
+  if (explicitSize && (selectedModel === MODEL_FIREFLY || FIREFLY_SIZES[ratio])) {
     if (!FIREFLY_SIZES[ratio]) {
       throw planError(
         `Unsupported firefly ratio ${ratio}. Use one of: ${Object.keys(FIREFLY_SIZES).join(", ")}.`,
@@ -359,7 +467,7 @@ export function resolveImageRequest(input = {}) {
     }
     const nativeSize = fireflySize(ratio, tier || nearestFireflyTier(explicitSize));
     return finalizePlan({
-      model: forcedModel || MODEL_FIREFLY,
+      model: selectedModel || MODEL_FIREFLY,
       size: nativeSize,
       targetSize: explicitTarget?.size || explicitSize.size,
       quality,
@@ -375,7 +483,7 @@ export function resolveImageRequest(input = {}) {
   if (ratio && FIREFLY_SIZES[ratio] && (tier === "2k" || tier === "4k" || !GPT_IMAGE_2_SIZES[ratio])) {
     const chosenTier = tier || "1k";
     return finalizePlan({
-      model: forcedModel || MODEL_FIREFLY,
+      model: selectedModel || MODEL_FIREFLY,
       size: fireflySize(ratio, chosenTier),
       targetSize: explicitTarget?.size || null,
       quality,
@@ -390,7 +498,7 @@ export function resolveImageRequest(input = {}) {
 
   if (ratio && GPT_IMAGE_2_SIZES[ratio]) {
     return finalizePlan({
-      model: forcedModel || MODEL_GPT_IMAGE_2,
+      model: selectedModel || MODEL_GPT_IMAGE_2,
       size: GPT_IMAGE_2_SIZES[ratio],
       targetSize: explicitTarget?.size || null,
       quality,
@@ -404,7 +512,7 @@ export function resolveImageRequest(input = {}) {
   }
 
   return finalizePlan({
-    model: forcedModel || DEFAULT_MODEL,
+      model: selectedModel || DEFAULT_MODEL,
     size: "1024x1024",
     targetSize: explicitTarget?.size || null,
     quality,
@@ -412,7 +520,7 @@ export function resolveImageRequest(input = {}) {
     outputFormat,
     prompt,
     reason: "default-1k-square",
-    selectedBy: forcedModel ? "user-model" : "default",
+      selectedBy: forcedModel ? "user-model" : inferredModel ? "named-model" : "default",
     noResize,
   });
 }
@@ -421,6 +529,13 @@ function nearestFireflyTier(parsed) {
   const longEdge = Math.max(parsed.width, parsed.height);
   if (longEdge >= 2500) return "4k";
   if (longEdge >= 1400) return "2k";
+  return "1k";
+}
+
+function nearestNanoTier(parsed) {
+  const longEdge = Math.max(parsed.width, parsed.height);
+  if (longEdge >= 3500) return "4k";
+  if (longEdge >= 1800) return "2k";
   return "1k";
 }
 

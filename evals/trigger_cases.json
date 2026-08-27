@@ -23,6 +23,10 @@
     {
       "text": "生成一个可以叠在任意网页背景上的透明底商品素材。",
       "family": "generate_transparent_cn"
+    },
+    {
+      "text": "把这张商品图抠出来，背景变透明。",
+      "family": "remove_background_cn"
     }
   ],
   "should_not_trigger": [

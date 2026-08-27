@@ -20,8 +20,19 @@ BeefAPI key (`[model_providers.beefapi]` + `auth.json`) when it can. If it
 cannot, run `setup --api-key` with a `gpt-plus` / `gpt-pro` key. Setup stores
 a dedicated override, checks `/v1/models`, and does not create an image.
 `--offline` verifies package, state, and credential permissions without a
-network request. `doctor` warns when `gpt-image-2-firefly` is missing; 淘系
-and 2K/4K jobs need that model.
+network request. `doctor` reports the optional high-resolution, Nano, and
+cutout capabilities visible to the token.
+
+## Natural-language capability selection
+
+The user should invoke one `beefapi-image2` skill and describe the desired
+result. Do not ask them to choose a model. With `edit --image`:
+
+- 抠图 / 去背景 / remove background → transparent background removal.
+
+The CLI uses the real internal capability IDs so BeefAPI routing, upstream
+credits, and billing remain accurate. Those IDs are an advanced implementation
+detail, not a user decision.
 
 ## Generate
 
@@ -37,7 +48,6 @@ beefapi-image2 generate \
 beefapi-image2 generate \
   --prompt "transparent product cutout" \
   --background transparent \
-  --model gpt-image-2 \
   --output-format png \
   --out output/imagegen/product-cutout.png
 ```
@@ -45,7 +55,8 @@ beefapi-image2 generate \
 Useful options:
 
 - `--prompt-file <path>`: read a UTF-8 prompt from a file.
-- `--model gpt-image-2|gpt-image-2-firefly`: override auto selection.
+- `--model`: advanced override. Accepted values are `gpt-image-2`,
+  `gpt-image-2-firefly`, `nano-banana-2`, `nano-banana-pro`, and `remove-bg`.
 - `--size WxH|auto`: send this size upstream. `1440x1440` is mapped to a
   firefly native size plus a 1440 target, not sent to `gpt-image-2` as-is.
 - `--target-size WxH`: final canvas after generation. Default for 淘系/1440
@@ -75,6 +86,10 @@ Auto selection:
   `1:1`.
 - `--model` always wins.
 
+Nano Banana 2/Pro use their Leonardo-native 1K/2K/4K pixel tables when the
+user explicitly asks for either Nano capability. Ordinary 2K/4K intent keeps
+the existing Firefly route.
+
 ## Edit
 
 ```bash
@@ -86,8 +101,32 @@ beefapi-image2 edit \
   --out output/imagegen/edited.png
 ```
 
-Repeat `--image` for multiple references. Input files must be non-empty images
-and no larger than 32 MiB each. Model/size selection matches generate.
+Repeat `--image` for multiple references. GPT Image2/Nano edits accept up to
+six PNG/JPEG/WebP references, at most 30 MiB each and 180 MiB combined. Model
+and size selection matches generate. Leonardo cutout and the current
+Leonardo Image2 route reject masks.
+
+### Background removal
+
+Background removal requires exactly one input image. Natural-language intent
+is enough; advanced controls are:
+
+- `--size auto|preview|full|50mp`
+- `--channels rgba|alpha`
+- `--foreground-type auto|person|product|car|animal|graphic|transportation|other`
+- `--crop true|false`, `--semitransparency true|false`
+- `--shadow-opacity 0..100`, `--shadow-type none|drop|3d|car`
+- `--type-level none|1|2|latest`
+- `--bg-color`, `--crop-margin`, `--position`, `--roi`, `--scale`
+
+The Leonardo cutout route supports `b64_json`; do not request `url`.
+
+## Actual output format
+
+Some upstreams may return JPEG bytes even when the request asked for PNG. The
+CLI checks the image signature before writing. If the bytes do not match the
+requested extension, it writes the correct `.jpg`, `.png`, `.webp`, or `.gif`
+path and reports that actual path instead of creating a misleading file.
 
 ## Remove
 

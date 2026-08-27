@@ -3,6 +3,9 @@ import { test } from "node:test";
 import {
   MODEL_FIREFLY,
   MODEL_GPT_IMAGE_2,
+  MODEL_NANO_BANANA_2,
+  MODEL_NANO_BANANA_PRO,
+  MODEL_REMOVE_BG,
   resolveImageRequest,
   rewriteCanvasPixels,
 } from "../scripts/resolve-image-request.mjs";
@@ -89,4 +92,39 @@ test("explicit firefly native size is passed through", () => {
 test("rewriteCanvasPixels scales logo hints", () => {
   assert.equal(rewriteCanvasPixels("logo 200px", 2048, 1440), "logo 284px");
   assert.equal(rewriteCanvasPixels("无尺寸", 2048, 1440), "无尺寸");
+});
+
+test("named Nano Banana Pro 4K ratio uses Leonardo native pixels", () => {
+  const plan = resolveImageRequest({
+    prompt: "用 Nano Banana Pro 出一张 4K 16:9 海报",
+  });
+  assert.equal(plan.model, MODEL_NANO_BANANA_PRO);
+  assert.equal(plan.size, "5504x3072");
+  assert.equal(plan.reason, "nano-banana-pro-16:9-4k");
+});
+
+test("named Nano Banana 2 defaults to a 1K square", () => {
+  const plan = resolveImageRequest({ prompt: "用 Nano Banana 2 画一只猫" });
+  assert.equal(plan.model, MODEL_NANO_BANANA_2);
+  assert.equal(plan.size, "1024x1024");
+});
+
+test("background-removal intent selects the public cutout capability", () => {
+  assert.equal(
+    resolveImageRequest({ prompt: "给这张商品图抠图去背景", operation: "edit" }).model,
+    MODEL_REMOVE_BG,
+  );
+});
+
+test("utility requests preserve their non-pixel size contracts", () => {
+  const remove = resolveImageRequest({
+    prompt: "remove background",
+    operation: "edit",
+    model: "remove-bg",
+    size: "full",
+  });
+  assert.equal(remove.model, MODEL_REMOVE_BG);
+  assert.equal(remove.size, "full");
+  assert.equal(remove.resize, false);
+
 });

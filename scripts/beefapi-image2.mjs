@@ -7,9 +7,10 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   chmodSync,
+  createReadStream,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -24,18 +25,23 @@ import {
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { Readable } from "node:stream";
 import {
   DEFAULT_MODEL,
   MODEL_FIREFLY,
   MODEL_GPT_IMAGE_2,
+  MODEL_REMOVE_BG,
+  UTILITY_MODELS,
   resolveImageRequest,
 } from "./resolve-image-request.mjs";
 
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 const PRODUCT = "beefapi-codex-image2";
 const MODEL = DEFAULT_MODEL;
 const DEFAULT_BASE_URL = "https://beefapi.com/v1";
-const MAX_INPUT_BYTES = 32 * 1024 * 1024;
+const MAX_INPUT_BYTES = 30 * 1024 * 1024;
+const MAX_INPUT_TOTAL_BYTES = 180 * 1024 * 1024;
+const MAX_INPUT_IMAGES = 6;
 const REQUEST_TIMEOUT_MS = 180_000;
 const MANAGED_MARKER = ".beefapi-image2-managed.json";
 
@@ -488,7 +494,9 @@ function requireModelAccess(models, model) {
       "This key cannot use gpt-image-2-firefly. Ask for a gpt-plus or gpt-pro key and run setup --api-key, or retry with --model gpt-image-2.",
     );
   }
-  fail(GPT_IMAGE_KEY_HINT);
+  fail(
+    `This key cannot use ${model}. Use a gpt-plus / gpt-pro key with the requested Image2 capability, then run setup --api-key.`,
+  );
 }
 
 async function commandSetup(options) {
@@ -627,11 +635,18 @@ async function commandDoctor(options) {
     try {
       const models = await checkModel(credential);
       add(true, `${MODEL_GPT_IMAGE_2} is visible to this token`);
-      add(
-        models.includes(MODEL_FIREFLY),
-        `${MODEL_FIREFLY} is visible to this token`,
-        true,
-      );
+      for (const optionalModel of [
+        MODEL_FIREFLY,
+        "nano-banana-2",
+        "nano-banana-pro",
+        MODEL_REMOVE_BG,
+      ]) {
+        add(
+          models.includes(optionalModel),
+          `${optionalModel} is visible to this token`,
+          true,
+        );
+      }
     } catch (error) {
       if (error.message !== "__BEEFAPI_IMAGE2_HANDLED__") throw error;
       add(false, `${MODEL_GPT_IMAGE_2} is visible to this token`);
@@ -664,7 +679,7 @@ function readPrompt(options) {
   return prompt;
 }
 
-function planImageRequest(options, prompt) {
+function planImageRequest(options, prompt, operation) {
   const n = Number(options.n || 1);
   if (!Number.isInteger(n) || n !== 1)
     fail("BeefAPI Image2 currently requires --n 1.");
@@ -685,6 +700,7 @@ function planImageRequest(options, prompt) {
       background: options.background,
       outputFormat: options["output-format"],
       noResize: Boolean(options["no-resize"]),
+      operation,
     });
   } catch (error) {
     fail(error.message);
@@ -758,6 +774,47 @@ function writeImage(filePath, bytes, force = false) {
   info(`Wrote ${filePath}`);
 }
 
+function actualImageFormat(bytes) {
+  if (
+    bytes.length >= 8 &&
+    bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  ) {
+    return { name: "PNG", extension: ".png" };
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return { name: "JPEG", extension: ".jpg" };
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes.subarray(0, 4).toString("ascii") === "RIFF" &&
+    bytes.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return { name: "WebP", extension: ".webp" };
+  }
+  if (bytes.length >= 6 && /^GIF8[79]a$/.test(bytes.subarray(0, 6).toString("ascii"))) {
+    return { name: "GIF", extension: ".gif" };
+  }
+  return null;
+}
+
+function actualOutputPath(requested, bytes, force = false) {
+  const actual = actualImageFormat(bytes);
+  if (!actual) return requested;
+  const requestedExt = path.extname(requested).toLowerCase();
+  const compatible =
+    requestedExt === actual.extension ||
+    (actual.name === "JPEG" && requestedExt === ".jpeg");
+  if (compatible) return requested;
+  const corrected = `${requested.slice(0, requested.length - requestedExt.length)}${actual.extension}`;
+  if (existsSync(corrected) && !force) {
+    fail(`Actual-format output already exists: ${corrected} (use --force to overwrite)`);
+  }
+  info(
+    `Upstream returned ${actual.name}; writing ${corrected} instead of requested ${requested}.`,
+  );
+  return corrected;
+}
+
 function commandExists(bin) {
   const result = spawnSync(bin, ["-h"], { encoding: "utf8" });
   if (result.error?.code === "ENOENT") return false;
@@ -813,19 +870,25 @@ function describePlan(plan, extra = {}) {
   };
 }
 
-async function callImageApi(endpoint, body, credential, multipart = false) {
+async function callImageApi(endpoint, body, credential, multipart = null) {
   const headers = {
     Authorization: `Bearer ${credential.apiKey}`,
     Accept: "application/json",
     "User-Agent": `${PRODUCT}/${VERSION}`,
   };
-  if (!multipart) headers["Content-Type"] = "application/json";
+  if (multipart) {
+    headers["Content-Type"] = multipart.contentType;
+    headers["Content-Length"] = String(multipart.contentLength);
+  } else {
+    headers["Content-Type"] = "application/json";
+  }
   return apiJson(
     `${credential.baseUrl}${endpoint}`,
     {
       method: "POST",
       headers,
-      body: multipart ? body : JSON.stringify(body),
+      body: multipart ? multipart.body : JSON.stringify(body),
+      ...(multipart ? { duplex: "half" } : {}),
     },
     credential.apiKey,
   );
@@ -833,7 +896,7 @@ async function callImageApi(endpoint, body, credential, multipart = false) {
 
 async function commandGenerate(options) {
   const prompt = readPrompt(options);
-  const plan = planImageRequest(options, prompt);
+  const plan = planImageRequest(options, prompt, "generate");
   const out = outputPath(options, plan.outputFormat);
   const payload = {
     model: plan.model,
@@ -878,7 +941,8 @@ async function commandGenerate(options) {
       );
     }
   }
-  writeImage(out, bytes, options.force);
+  const actualOut = actualOutputPath(out, bytes, options.force);
+  writeImage(actualOut, bytes, options.force);
 }
 
 function mimeFor(filePath) {
@@ -900,19 +964,150 @@ function checkedInput(filePath, label) {
   const stat = statSync(absolute);
   if (!stat.isFile() || stat.size === 0)
     fail(`${label} must be a non-empty file: ${absolute}`);
-  if (stat.size > MAX_INPUT_BYTES) fail(`${label} exceeds 32 MiB: ${absolute}`);
+  if (stat.size > MAX_INPUT_BYTES) fail(`${label} exceeds 30 MiB: ${absolute}`);
   const mime = mimeFor(absolute);
   if (!mime.startsWith("image/"))
     fail(`${label} must be png, jpeg, webp, or gif: ${absolute}`);
-  return { absolute, mime, bytes: readFileSync(absolute) };
+  return { absolute, mime, size: stat.size };
+}
+
+function quoteDisposition(value) {
+  return String(value).replace(/["\\\r\n]/g, "_");
+}
+
+function multipartUpload(fields, files) {
+  const boundary = `----beefapi-image2-${randomBytes(18).toString("hex")}`;
+  const parts = [];
+  let contentLength = 0;
+  for (const [name, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    const data = Buffer.from(String(value));
+    const header = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${quoteDisposition(name)}"\r\n\r\n`,
+    );
+    const trailer = Buffer.from("\r\n");
+    parts.push({ header, data, trailer });
+    contentLength += header.length + data.length + trailer.length;
+  }
+  for (const file of files) {
+    const header = Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${quoteDisposition(file.field)}"; filename="${quoteDisposition(path.basename(file.absolute))}"\r\nContent-Type: ${file.mime}\r\n\r\n`,
+    );
+    const trailer = Buffer.from("\r\n");
+    parts.push({ header, file, trailer });
+    contentLength += header.length + file.size + trailer.length;
+  }
+  const closing = Buffer.from(`--${boundary}--\r\n`);
+  contentLength += closing.length;
+
+  async function* chunks() {
+    for (const part of parts) {
+      yield part.header;
+      if (part.file) {
+        for await (const chunk of createReadStream(part.file.absolute)) yield chunk;
+      } else {
+        yield part.data;
+      }
+      yield part.trailer;
+    }
+    yield closing;
+  }
+
+  return {
+    body: Readable.from(chunks()),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+    contentLength,
+  };
+}
+
+function parseBooleanOption(options, key) {
+  if (options[key] === undefined) return undefined;
+  const value = String(options[key]).trim().toLowerCase();
+  if (value === "true") return true;
+  if (value === "false") return false;
+  fail(`--${key} must be true or false.`);
+}
+
+function requireChoice(options, key, choices) {
+  if (options[key] === undefined) return undefined;
+  const value = String(options[key]).trim().toLowerCase();
+  if (!choices.includes(value)) {
+    fail(`--${key} must be one of: ${choices.join(", ")}.`);
+  }
+  return value;
+}
+
+function utilityOptionValues(options, model) {
+  if (!UTILITY_MODELS.has(model)) return {};
+  if (options["response-format"] && options["response-format"] !== "b64_json") {
+    fail(`${model} supports only --response-format b64_json.`);
+  }
+  if (model === MODEL_REMOVE_BG) {
+    const shadowOpacity = options["shadow-opacity"];
+    if (
+      shadowOpacity !== undefined &&
+      (!/^\d+$/.test(String(shadowOpacity)) || Number(shadowOpacity) > 100)
+    ) {
+      fail("--shadow-opacity must be an integer from 0 to 100.");
+    }
+    return {
+      channels: requireChoice(options, "channels", ["rgba", "alpha"]),
+      type: requireChoice(options, "foreground-type", [
+        "auto",
+        "person",
+        "product",
+        "car",
+        "animal",
+        "graphic",
+        "transportation",
+        "other",
+      ]),
+      crop: parseBooleanOption(options, "crop"),
+      semitransparency: parseBooleanOption(options, "semitransparency"),
+      shadow_opacity:
+        shadowOpacity === undefined ? undefined : String(Number(shadowOpacity)),
+      shadow_type: requireChoice(options, "shadow-type", [
+        "none",
+        "drop",
+        "3d",
+        "car",
+      ]),
+      type_level: requireChoice(options, "type-level", [
+        "none",
+        "1",
+        "2",
+        "latest",
+      ]),
+      bg_color: options["bg-color"],
+      crop_margin: options["crop-margin"],
+      position: options.position,
+      roi: options.roi,
+      scale: options.scale,
+    };
+  }
+
+  return {};
 }
 
 async function commandEdit(options) {
   const prompt = readPrompt(options);
-  const plan = planImageRequest(options, prompt);
+  const plan = planImageRequest(options, prompt, "edit");
   if (!options.image.length) fail("Edit requires at least one --image path.");
+  if (options.image.length > MAX_INPUT_IMAGES) {
+    fail(`Edit accepts at most ${MAX_INPUT_IMAGES} --image references.`);
+  }
   const images = options.image.map((item) => checkedInput(item, "Image"));
+  const totalBytes = images.reduce((sum, item) => sum + item.size, 0);
+  if (totalBytes > MAX_INPUT_TOTAL_BYTES) {
+    fail("Combined reference images exceed 180 MiB.");
+  }
   const mask = options.mask ? checkedInput(options.mask, "Mask") : null;
+  if (UTILITY_MODELS.has(plan.model) && images.length !== 1) {
+    fail(`${plan.model} requires exactly one --image reference.`);
+  }
+  if (UTILITY_MODELS.has(plan.model) && mask) {
+    fail(`${plan.model} does not accept --mask.`);
+  }
   const out = outputPath(options, plan.outputFormat);
   if (options["dry-run"]) {
     payloadPreview(
@@ -927,6 +1122,7 @@ async function commandEdit(options) {
         background: plan.background,
         output_format: plan.outputFormat,
         input_fidelity: options["input-fidelity"],
+        ...utilityOptionValues(options, plan.model),
       },
       describePlan(plan, {
         image: images.map((item) => item.absolute),
@@ -936,31 +1132,22 @@ async function commandEdit(options) {
     );
     return;
   }
-  const form = new FormData();
-  form.append("model", plan.model);
-  form.append("prompt", plan.prompt);
-  form.append("n", "1");
-  form.append("size", plan.size);
-  form.append("quality", plan.quality);
-  form.append("output_format", plan.outputFormat);
-  if (plan.background) form.append("background", plan.background);
-  if (options["response-format"])
-    form.append("response_format", options["response-format"]);
-  if (options["input-fidelity"])
-    form.append("input_fidelity", options["input-fidelity"]);
-  for (const image of images) {
-    form.append(
-      "image",
-      new Blob([image.bytes], { type: image.mime }),
-      path.basename(image.absolute),
-    );
-  }
-  if (mask)
-    form.append(
-      "mask",
-      new Blob([mask.bytes], { type: mask.mime }),
-      path.basename(mask.absolute),
-    );
+  const fields = {
+    model: plan.model,
+    prompt: plan.prompt,
+    n: "1",
+    size: plan.size,
+    quality: UTILITY_MODELS.has(plan.model) ? undefined : plan.quality,
+    output_format: plan.outputFormat,
+    background: plan.background,
+    response_format: options["response-format"],
+    input_fidelity: options["input-fidelity"],
+    ...utilityOptionValues(options, plan.model),
+  };
+  const upload = multipartUpload(fields, [
+    ...images.map((image) => ({ ...image, field: "image" })),
+    ...(mask ? [{ ...mask, field: "mask" }] : []),
+  ]);
 
   const credential = resolveCredential();
   const models = await listModels(credential);
@@ -969,7 +1156,7 @@ async function commandEdit(options) {
     `Editing one ${plan.model} image at ${plan.size}${plan.targetSize ? ` (target ${plan.targetSize})` : ""} via ${credential.source}; this consumes BeefAPI quota and may take a couple of minutes…`,
   );
   if (plan.warning) info(plan.warning);
-  const result = await callImageApi("/images/edits", form, credential, true);
+  const result = await callImageApi("/images/edits", null, credential, upload);
   if (!Array.isArray(result?.data) || !result.data.length)
     fail("Image API returned no images.");
   let bytes = await imageBytes(result.data[0], credential.baseUrl);
@@ -984,7 +1171,8 @@ async function commandEdit(options) {
       );
     }
   }
-  writeImage(out, bytes, options.force);
+  const actualOut = actualOutputPath(out, bytes, options.force);
+  writeImage(actualOut, bytes, options.force);
 }
 
 function isInside(child, parent) {
@@ -1078,8 +1266,8 @@ Otherwise: setup --api-key <key>
 
 Image options:
   --n 1
-  --model gpt-image-2|gpt-image-2-firefly
-  --size WxH|auto
+  --model <advanced override>
+  --size WxH|auto|preview|full|50mp
   --target-size WxH
   --resolution 1k|2k|4k
   --quality low|medium|high|auto
@@ -1090,8 +1278,19 @@ Image options:
   --dry-run
   --force
 
+Edit utilities (normally inferred from the prompt):
+  --channels rgba|alpha
+  --foreground-type auto|person|product|car|animal|graphic|transportation|other
+  --crop true|false
+  --semitransparency true|false
+  --shadow-opacity 0..100
+  --shadow-type none|drop|3d|car
+  --type-level none|1|2|latest
+  --bg-color <color> --crop-margin <value> --position <value> --roi <value> --scale <value>
+
 Without --model/--size, the CLI reads 淘系/1440/1:1/3:4/9:16/2K/4K from the
-prompt and selects gpt-image-2 or gpt-image-2-firefly plus a native size.
+prompt. Edit prompts also infer background removal, so
+the user does not need to choose an internal model.
 `);
 }
 

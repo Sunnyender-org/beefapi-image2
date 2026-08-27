@@ -2,9 +2,10 @@
 
 Codex / Claude Code skill for BeefAPI image generation.
 
-Speak in natural language. The CLI picks `gpt-image-2` or
-`gpt-image-2-firefly`, maps 淘系 / 1440 / 1:1 / 3:4 / 9:16 onto native
-pixels, and can resize to 1440. You still need a BeefAPI API key.
+Speak in natural language. The CLI chooses generation, reference-image edits,
+or transparent cutouts without making the user
+select a model. It also maps 淘系 / 1440 / 1:1 / 3:4 / 9:16 onto native pixels
+and can resize to 1440. You still need a BeefAPI API key.
 
 Transparent-background assets use `gpt-image-2` with PNG or WebP output. A
 plain `2K` or `4K` request without an aspect ratio defaults to a square
@@ -46,15 +47,22 @@ node ~/.codex/skills/beefapi-image2/scripts/beefapi-image2.mjs generate \
 node ~/.codex/skills/beefapi-image2/scripts/beefapi-image2.mjs generate \
   --prompt "透明底商品素材" \
   --background transparent \
-  --model gpt-image-2 \
   --output-format png \
   --out product-cutout.png
+
+node ~/.codex/skills/beefapi-image2/scripts/beefapi-image2.mjs edit \
+  --image product.png \
+  --prompt "给商品抠图并输出透明素材" \
+  --out product-cutout.png
+
 ```
 
 Or, after the installer: `beefapi-image2 generate --prompt "..."`.
 
-Default 1K square stays on `gpt-image-2`. 淘系 / 1440 / 2K / 4K select
-firefly. `--model` overrides. See `references/cli.md`.
+Default 1K square stays on Image2. 淘系 / 1440 / 2K / 4K select the verified
+high-resolution route. Background removal is selected from edit intent.
+Advanced explicit overrides are documented in
+`references/cli.md`.
 
 ## Test
 

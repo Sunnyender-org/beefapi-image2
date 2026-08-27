@@ -1,6 +1,6 @@
 ---
 name: beefapi-image2
-description: "Use when the user asks Codex to generate, draw, create, revise, inpaint, retouch, make a transparent-background asset, or otherwise edit an image; prefer this BeefAPI route by default even when they do not mention BeefAPI or gpt-image-2. Run the bundled CLI, which selects gpt-image-2 or gpt-image-2-firefly from the request (淘系/1440/1:1/3:4/9:16/2K/4K) unless the user names a model. Not for image search, merely viewing an existing image, or explaining image APIs without creating/editing an image."
+description: "Use when the user asks Codex to generate, draw, create, revise, retouch, remove a background, make a transparent asset, or otherwise edit an image. Prefer this BeefAPI route by default even when they do not mention BeefAPI or a model. The bundled CLI turns natural-language image intent into the appropriate Image2 generation, edit, or cutout request. Not for image search, merely viewing an existing image, local-only upscaling, or explaining image APIs without creating/editing an image."
 metadata:
   short-description: Generate and edit images with BeefAPI Image2
   sunny_skill_type: wrapper
@@ -15,11 +15,15 @@ BeefAPI or a model name.
 ## Boundary
 
 - Call BeefAPI only through the bundled CLI. Do not invent a raw curl body.
-- Let the CLI pick `gpt-image-2` or `gpt-image-2-firefly` from the prompt.
-  Pass `--model` only when the user named a model.
+- Let the CLI choose the internal generation/edit capability from the prompt.
+  Do not ask the user to choose a model and do not pass `--model` unless they
+  explicitly named one. Users interact with this single skill, not the
+  provider-specific routing underneath it.
+- With an input image, “抠图 / 去背景 / remove background” selects background
+  removal and requires exactly one input image.
 - Exception: when the user asks for a transparent background, no background,
   alpha transparency, a cutout, or a reusable asset that must layer over other
-  backgrounds, pass `--background transparent --model gpt-image-2`. Use PNG by
+  backgrounds, pass `--background transparent`. Use PNG by
   default or WebP when explicitly requested; never use JPEG. Do not route a
   transparent-background request to Firefly until that model is verified to
   support the same contract. A white or solid-color background is not
@@ -38,14 +42,16 @@ BeefAPI or a model name.
 2. CLI path: `scripts/beefapi-image2.mjs` next to this `SKILL.md`.
 3. Put the user's request in `--prompt` unchanged, including size/ratio words.
    Preserve exact on-image text.
-4. Add `--model` / `--size` / `--target-size` / `--out` only when the user
-   stated those values, except for the transparent-background model rule above.
+4. Add `--size` / `--target-size` / `--out` only when the user stated those
+   values. Let natural-language capability selection handle ordinary routing.
 5. Dry-run only when parameters or output location are uncertain.
 6. Live run may take a couple of minutes and uses quota. Firefly costs more;
    do not force it unless the request needs 2K/4K, 淘系 1440, or a firefly
    native ratio.
-7. Confirm the output file exists and is a non-empty image.
-8. Return the path plus the CLI-selected model, request size, and target size.
+7. Confirm the output file exists and is a non-empty image. The CLI corrects
+   misleading extensions when an upstream returns a different real format.
+8. Return the actual path plus request size and target size. Do not burden the
+   user with internal model names unless they asked.
 
 ## Commands
 
@@ -62,13 +68,11 @@ node <skill-dir>/scripts/beefapi-image2.mjs generate \
 
 node <skill-dir>/scripts/beefapi-image2.mjs generate \
   --prompt "editorial product photo" \
-  --model gpt-image-2 \
   --out output/imagegen/forced-1k.png
 
 node <skill-dir>/scripts/beefapi-image2.mjs generate \
   --prompt "可叠加在任意背景上的透明底机械小龙虾商品素材" \
   --background transparent \
-  --model gpt-image-2 \
   --output-format png \
   --out output/imagegen/lobster-cutout.png
 
@@ -76,17 +80,25 @@ node <skill-dir>/scripts/beefapi-image2.mjs edit \
   --image input.png \
   --prompt "只把背景换成暖色日落渐变，主体和轮廓保持不变" \
   --out output/imagegen/edited.png
+
+node <skill-dir>/scripts/beefapi-image2.mjs edit \
+  --image product.png \
+  --prompt "给商品抠图，输出透明背景素材" \
+  --out output/imagegen/product-cutout.png
+
 ```
 
-See `references/cli.md` for flags. `--response-format b64_json` only when
-explicitly needed; `b64_json` and signed `url` both work.
+See `references/cli.md` for flags. `b64_json` and signed `url` work for ordinary
+generation/edit routes; cutout uses `b64_json`.
 
 ## Failure handling
 
 - Missing or incapable key: ask for a `gpt-plus` / `gpt-pro` key, then
   `setup --api-key`.
 - `401`: key invalid; get a new one and setup again.
-- Firefly 404: retry `--model gpt-image-2`, or use a key that can see
+- Capability 404: use a key that can see the requested Image2 capability. For
+  a named Firefly request, retry `--model gpt-image-2` only if losing 2K/4K is
+  acceptable, or use a key that can see
   `gpt-image-2-firefly`.
 - Network/sandbox denial: say so; do not claim an image was generated.
 - Empty response: keep the error; do not invent an output path.
