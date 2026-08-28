@@ -35,10 +35,13 @@ import {
   resolveImageRequest,
 } from "./resolve-image-request.mjs";
 
-const VERSION = "0.5.1";
+const VERSION = "0.5.2";
 const PRODUCT = "beefapi-codex-image2";
 const MODEL = DEFAULT_MODEL;
 const DEFAULT_BASE_URL = "https://beefapi.com/v1";
+const LEGACY_BASE_URL_HOSTS = new Map([
+  ["api.beefapi.com", "beefapi.com"],
+]);
 const MAX_INPUT_BYTES = 30 * 1024 * 1024;
 const MAX_INPUT_TOTAL_BYTES = 180 * 1024 * 1024;
 const MAX_INPUT_IMAGES = 6;
@@ -106,6 +109,10 @@ function normalizeBaseUrl(raw) {
   if (parsed.username || parsed.password) {
     fail("API base URL must not contain credentials.");
   }
+  const canonicalHost = LEGACY_BASE_URL_HOSTS.get(
+    parsed.hostname.toLowerCase(),
+  );
+  if (canonicalHost) parsed.hostname = canonicalHost;
   const local = new Set(["localhost", "127.0.0.1", "::1"]).has(parsed.hostname);
   if (parsed.protocol !== "https:" && !(local && parsed.protocol === "http:")) {
     fail(
@@ -431,7 +438,23 @@ async function fetchWithTimeout(url, options = {}) {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
     if (error?.name === "AbortError") fail(`Request timed out: ${url}`);
-    fail(`Network request failed: ${error?.message || error}`);
+    let hostname = "API host";
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      // normalizeBaseUrl validates API URLs before fetch; keep a safe fallback.
+    }
+    const cause = error?.cause;
+    const causeDetail = [cause?.code, cause?.message]
+      .filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .join(": ")
+      .slice(0, 300);
+    fail(
+      `Network request to ${hostname} failed: ${error?.message || error}${
+        causeDetail ? ` (${causeDetail})` : ""
+      }`,
+    );
   } finally {
     clearTimeout(timeout);
   }
@@ -626,6 +649,7 @@ async function commandDoctor(options) {
       Boolean(credential.apiKey),
       `BeefAPI key from ${credential.source} (not printed)`,
     );
+    add(true, `API base URL: ${credential.baseUrl}`);
   } catch (error) {
     if (error.message !== "__BEEFAPI_IMAGE2_HANDLED__") throw error;
     add(false, "BeefAPI key from Codex auth.json or Image2 setup");

@@ -73,6 +73,11 @@ high-resolution route. Background removal is selected from edit intent.
 Advanced CLI controls are documented in `references/cli.md`; ordinary users
 should continue to describe the result in natural language.
 
+Legacy credentials that still reference the retired `api.beefapi.com` host are
+automatically migrated in memory to `https://beefapi.com/v1`. `doctor` reports
+the effective API base URL without printing the API key, and network failures
+identify the failed host and underlying DNS or connection cause.
+
 ## Test
 
 ```bash

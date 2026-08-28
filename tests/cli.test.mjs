@@ -192,6 +192,19 @@ test("setup accepts --api-key without env and does not print it", async () => {
   assert.equal(modelRequest.headers.authorization, `Bearer ${flagKey}`);
 });
 
+test("setup migrates the retired api.beefapi.com host", async () => {
+  const isolated = path.join(fixtureRoot, "legacy-setup-config");
+  mkdirSync(isolated, { recursive: true });
+  await run(["setup", "--skip-check"], {
+    configDir: isolated,
+    baseUrl: "https://api.beefapi.com/v1",
+  });
+  const credential = JSON.parse(
+    readFileSync(path.join(isolated, "image2.credentials.json"), "utf8"),
+  );
+  assert.equal(credential.base_url, "https://beefapi.com/v1");
+});
+
 test("generate enforces model/n=1 and writes b64_json output", async () => {
   const out = path.join(fixtureRoot, "generated.png");
   await run([
@@ -445,7 +458,7 @@ test("generate uses Codex BeefAPI auth.json without a dedicated setup file", asy
       "",
       "[model_providers.beefapi]",
       'name = "beefapi"',
-      'base_url = "https://beefapi.com/v1"',
+      `base_url = "${baseUrl}"`,
       'wire_api = "responses"',
       "requires_openai_auth = true",
       "",
@@ -464,6 +477,7 @@ test("generate uses Codex BeefAPI auth.json without a dedicated setup file", asy
     {
       withKey: false,
       configDir: isolated,
+      useBaseUrlEnv: false,
       env: { CODEX_HOME: isolatedCodex },
     },
   );
@@ -474,6 +488,94 @@ test("generate uses Codex BeefAPI auth.json without a dedicated setup file", asy
   assert.equal(request.headers.authorization, `Bearer ${apiKey}`);
   const payload = JSON.parse(request.body.toString("utf8"));
   assert.equal(payload.model, "gpt-image-2");
+});
+
+test("offline doctor migrates retired hosts from dedicated and Codex credentials", async () => {
+  const dedicated = path.join(fixtureRoot, "legacy-dedicated-config");
+  const dedicatedCodex = path.join(fixtureRoot, "legacy-dedicated-codex-home");
+  mkdirSync(dedicated, { recursive: true });
+  mkdirSync(path.join(dedicatedCodex, "skills", "beefapi-image2"), {
+    recursive: true,
+  });
+  writeFileSync(
+    path.join(dedicatedCodex, "skills", "beefapi-image2", "SKILL.md"),
+    "---\nname: beefapi-image2\ndescription: test fixture\n---\n",
+  );
+  writeFileSync(
+    path.join(dedicated, "image2.credentials.json"),
+    JSON.stringify({
+      api_key: apiKey,
+      base_url: "https://api.beefapi.com/v1",
+    }),
+    { mode: 0o600 },
+  );
+  const dedicatedDoctor = await run(["doctor", "--offline"], {
+    configDir: dedicated,
+    withKey: false,
+    useBaseUrlEnv: false,
+    env: { CODEX_HOME: dedicatedCodex },
+  });
+  assert.match(
+    dedicatedDoctor.stdout,
+    /PASS  API base URL: https:\/\/beefapi\.com\/v1/,
+  );
+
+  const legacyCodex = path.join(fixtureRoot, "legacy-codex-home");
+  const codexOnlyConfig = path.join(fixtureRoot, "legacy-codex-only-config");
+  mkdirSync(legacyCodex, { recursive: true });
+  mkdirSync(codexOnlyConfig, { recursive: true });
+  mkdirSync(path.join(legacyCodex, "skills", "beefapi-image2"), {
+    recursive: true,
+  });
+  writeFileSync(
+    path.join(legacyCodex, "skills", "beefapi-image2", "SKILL.md"),
+    "---\nname: beefapi-image2\ndescription: test fixture\n---\n",
+  );
+  writeFileSync(
+    path.join(legacyCodex, "config.toml"),
+    [
+      'model_provider = "beefapi"',
+      "",
+      "[model_providers.beefapi]",
+      'name = "beefapi"',
+      'base_url = "https://api.beefapi.com/v1"',
+      'env_key = "OPENAI_API_KEY"',
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    path.join(legacyCodex, "auth.json"),
+    `${JSON.stringify({ OPENAI_API_KEY: apiKey })}\n`,
+  );
+  const codexDoctor = await run(["doctor", "--offline"], {
+    configDir: codexOnlyConfig,
+    withKey: false,
+    useBaseUrlEnv: false,
+    env: { CODEX_HOME: legacyCodex },
+  });
+  assert.match(
+    codexDoctor.stdout,
+    /PASS  API base URL: https:\/\/beefapi\.com\/v1/,
+  );
+});
+
+test("network failures identify the host and low-level cause without leaking the key", async () => {
+  const isolated = path.join(fixtureRoot, "network-error-config");
+  mkdirSync(isolated, { recursive: true });
+  const result = await spawnCli(
+    ["generate", "--prompt", "network diagnostic", "--out", path.join(fixtureRoot, "network.png")],
+    {
+      configDir: isolated,
+      baseUrl: "http://127.0.0.1:65534/v1",
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    /Network request to 127\.0\.0\.1 failed: fetch failed/,
+  );
+  assert.match(result.stderr, /ECONNREFUSED|connection refused/i);
+  assert.doesNotMatch(result.stdout + result.stderr, new RegExp(apiKey));
 });
 
 test("invalid JSON and missing credentials fail clearly without leaking secrets", async () => {
