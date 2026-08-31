@@ -1,6 +1,6 @@
 {
   "name": "beefapi-image2",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "description": "BeefAPI Image2 Codex skill and CLI for natural-language image generation",
   "license": "AGPL-3.0-or-later",

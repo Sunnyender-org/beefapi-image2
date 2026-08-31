@@ -57,8 +57,12 @@ Useful options:
 - `--prompt-file <path>`: read a UTF-8 prompt from a file.
 - `--model`: advanced override. Accepted values are `gpt-image-2`,
   `gpt-image-2-firefly`, `nano-banana-2`, `nano-banana-pro`, and `remove-bg`.
-- `--size WxH|auto`: send this size upstream. `1440x1440` is mapped to a
-  firefly native size plus a 1440 target, not sent to `gpt-image-2` as-is.
+- `--size WxH|auto`: an explicit pixel canvas selects `gpt-image-2` unless
+  another model was named. The Leonardo channel uses native dimensions when
+  supported; otherwise it fits a suitable native generation to the requested
+  canvas. Requires the channel-side canvas update. Arbitrary output dimensions
+  do not imply arbitrary native generation support.
+  Canvas limits: 8192 per edge, 16,777,216 total pixels.
 - `--target-size WxH`: final canvas after generation. Default for 淘系/1440
   is 1440-wide 1:1, 3:4, or 9:16.
 - `--resolution 1k|2k|4k`.
@@ -67,6 +71,11 @@ Useful options:
 - `--output-format png|jpeg|webp`.
 - `--response-format b64_json|url`.
 - `--no-resize`: keep native pixels even when a target size was inferred.
+- `--fit pad|crop|native`: default `pad` keeps all content and adds centered
+  white padding (transparent for alpha images). `crop` explicitly permits
+  centered cropping. Both scale uniformly. `native` forbids fitting and errors
+  on unsupported native dimensions. Upscaling is disclosed, not presented as
+  increased image detail.
 - `--force`: overwrite an existing output.
 - `--dry-run`: print the resolved model/size/target without credentials or a
   paid request.
@@ -80,7 +89,16 @@ Auto selection:
 
 - Default: `gpt-image-2` at `1024x1024`.
 - 淘系 / 1440 / 1:1·3:4·9:16 at 1440-wide: `gpt-image-2-firefly` 2K native,
-  then local resize to 1440 when `sips` or ImageMagick is available.
+  then local fitting when `sips` or ImageMagick is available. An explicit
+  `--size 1440x1440` instead uses the `gpt-image-2` server-side canvas route.
+
+Generate/edit pass fitting preferences in `extra_fields.image_canvas.fit` on
+the GPT route. Responses can include `metadata.image_canvas`: source_size,
+delivered_size, operation, fit, padding and upscaled. The CLI prints this
+metadata and checks actual image headers before reporting an exact canvas.
+Other channels may reject unsupported sizes; there is no blind regeneration
+retry. If local fitting fails after generation, the original is saved as
+`.native.*`, the CLI exits nonzero, and no second paid generation is sent.
 - 2K/4K or firefly-only ratios (16:9, 9:16, 3:4, 4:3, 3:2, 2:3, 5:4, 4:5,
   21:9): `gpt-image-2-firefly`. A 2K/4K request without a ratio defaults to
   `1:1`.
