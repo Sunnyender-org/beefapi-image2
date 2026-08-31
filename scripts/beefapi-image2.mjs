@@ -36,7 +36,7 @@ import {
 } from "./resolve-image-request.mjs";
 import { canvasDeliveryMetadata, fitImageCanvas, imageDimensions, localCanvasTool } from "./image-canvas.mjs";
 
-const VERSION = "0.5.3";
+const VERSION = "0.5.4";
 const PRODUCT = "beefapi-codex-image2";
 const MODEL = DEFAULT_MODEL;
 const DEFAULT_BASE_URL = "https://beefapi.com/v1";

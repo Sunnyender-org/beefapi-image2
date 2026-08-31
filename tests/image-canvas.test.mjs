@@ -36,6 +36,20 @@ test("image dimensions come from bytes and exact sizes keep bytes intact", () =>
   assert.equal(imageDimensions(Buffer.from("not an image")), null);
 });
 
+for (const target of ["100x50", "400x200", "200x100"]) {
+  test(`no padding metadata for ${target} without a border`, { skip: !localCanvasTool("png") }, () => {
+    const result = fitImageCanvas(png(200, 100), target);
+    assert.equal("padding" in result.metadata, false);
+    assert.equal(result.metadata.operation, target === "200x100" ? "native" : "resize");
+  });
+}
+
+test("a real one-pixel sips rounding border remains reported", { skip: localCanvasTool("png") !== "sips" }, () => {
+  const result = fitImageCanvas(png(201, 100), "100x50");
+  assert.equal(result.metadata.padding, "white");
+  assert.equal(result.metadata.operation, "pad");
+});
+
 for (const fit of ["pad", "crop"]) {
   test(`real local tool ${fit} fits exact pixels without stretching`, { skip: !localCanvasTool("png") }, () => {
     const result = fitImageCanvas(png(200, 100), "100x100", { fit });
