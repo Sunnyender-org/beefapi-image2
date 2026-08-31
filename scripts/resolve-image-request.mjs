@@ -62,9 +62,17 @@ export const GPT_IMAGE_2_SIZES = {
 // Exact consumer-route outputs verified from image bytes, not only API metadata.
 // Keep ratio defaults above unchanged; explicit pixels must not become a resize.
 export const GPT_IMAGE_2_EXACT_SIZES = new Set([
-  ...Object.values(GPT_IMAGE_2_SIZES),
-  "1536x1536",
-  "2048x1024",
+  "1584x672", "2048x864", "3808x1632",
+  "1376x768", "2048x1136", "3584x2016",
+  "1264x848", "2048x1376", "3504x2336",
+  "1200x896", "2048x1536", "3264x2448",
+  "1152x928", "2048x1648", "3200x2560",
+  "1024x1024", "2048x2048", "2880x2880",
+  "928x1152", "1648x2048", "2560x3200",
+  "896x1200", "1536x2048", "2448x3264",
+  "848x1264", "1376x2048", "2336x3504",
+  "768x1376", "1136x2048", "2016x3584",
+  "1536x1024", "1024x1536", "1536x1536", "2048x1024",
 ]);
 
 // Leonardo Nano Banana native pixels. Public model names stay provider-neutral;

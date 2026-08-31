@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { deflateSync } from "node:zlib";
-import { fitImageCanvas, imageDimensions, localCanvasTool } from "../scripts/image-canvas.mjs";
+import { canvasDeliveryMetadata, fitImageCanvas, imageDimensions, localCanvasTool } from "../scripts/image-canvas.mjs";
 
 function png(width, height, alpha = false) {
   const chunk = (kind, bytes) => {
@@ -44,7 +44,19 @@ for (const fit of ["pad", "crop"]) {
     assert.equal(result.metadata.operation, fit);
     assert.equal(result.metadata.upscaled, false);
   });
+  test(`non-square local ${fit} preserves width-height order`, { skip: !localCanvasTool("png") }, () => {
+    const result = fitImageCanvas(png(200, 100), "128x72", { fit });
+    assert.equal(imageDimensions(result.bytes).width, 128);
+    assert.equal(imageDimensions(result.bytes).height, 72);
+  });
 }
+
+test("delivery metadata retains prior fitting and interpolation", () => {
+  const local = { source_size: "1440x1440", delivered_size: "1440x1440", fit: "pad", operation: "native", upscaled: false };
+  const server = { source_size: "1024x1024", delivered_size: "1440x1440", fit: "pad", operation: "resize", upscaled: true };
+  assert.deepEqual(canvasDeliveryMetadata(local, server), { ...server, verified_size: "1440x1440" });
+  assert.throws(() => canvasDeliveryMetadata({ ...local, fit: "native" }, server), /native-only/);
+});
 
 test("alpha padding either preserves alpha or explicitly requires a capable tool", () => {
   const image = png(200, 100, true);

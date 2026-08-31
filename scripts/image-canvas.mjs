@@ -47,6 +47,19 @@ function available(bin) {
   return !result.error && result.status === 0;
 }
 
+export function canvasDeliveryMetadata(local, upstream) {
+  if (!upstream || upstream.delivered_size !== local.delivered_size) {
+    return upstream ? { ...local, upstream_canvas: upstream, upscaled: local.upscaled || upstream.upscaled === true } : local;
+  }
+  if (local.fit === "native" && upstream.operation !== "native") {
+    throw new Error("Server post-processing does not satisfy native-only output.");
+  }
+  // Matching bytes only prove final dimensions, not native generation. Preserve
+  // the server's processing history when no additional local transform occurred.
+  return local.operation === "native" ? { ...upstream, verified_size: local.delivered_size }
+    : { ...local, upstream_canvas: upstream, upscaled: local.upscaled || upstream.upscaled === true };
+}
+
 export function localCanvasTool(format, alpha = false) {
   if (available("magick")) return "magick";
   if (process.platform !== "win32" && available("convert")) return "convert";
@@ -59,7 +72,7 @@ export function fitImageCanvas(bytes, target, { fit = "pad", format = "png" } = 
   const parsed = /^(\d+)x(\d+)$/.exec(target || "");
   if (!source || !parsed) throw new Error("Cannot verify the image or target dimensions.");
   const [width, height] = parsed.slice(1).map(Number);
-  const metadata = { source_size: `${source.width}x${source.height}`, delivered_size: target, operation: "native", upscaled: false };
+  const metadata = { source_size: `${source.width}x${source.height}`, delivered_size: target, fit, operation: "native", upscaled: false };
   if (source.width > 0 && source.height > 0 && metadata.source_size === target) return { bytes, metadata };
   if (![source.width, source.height, width, height].every(v => Number.isInteger(v) && v > 0 && v <= 8192)
       || width * height > 16777216 || source.width * source.height > 16777216) {

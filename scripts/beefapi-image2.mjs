@@ -34,7 +34,7 @@ import {
   UTILITY_MODELS,
   resolveImageRequest,
 } from "./resolve-image-request.mjs";
-import { fitImageCanvas, imageDimensions, localCanvasTool } from "./image-canvas.mjs";
+import { canvasDeliveryMetadata, fitImageCanvas, imageDimensions, localCanvasTool } from "./image-canvas.mjs";
 
 const VERSION = "0.5.3";
 const PRODUCT = "beefapi-codex-image2";
@@ -859,7 +859,7 @@ function deliverImage(bytes, plan, out, result, force) {
     try {
       const fitted = fitImageCanvas(bytes, plan.requestedSize, { fit: plan.fit, format: plan.outputFormat });
       bytes = fitted.bytes;
-      info(`Verified canvas: ${JSON.stringify(fitted.metadata)}`);
+      info(`Verified canvas: ${JSON.stringify(canvasDeliveryMetadata(fitted.metadata, serverCanvas))}`);
     } catch (error) {
       const extension = path.extname(out);
       const nativeOut = actualOutputPath(`${out.slice(0, out.length - extension.length)}.native${extension}`, bytes, force);

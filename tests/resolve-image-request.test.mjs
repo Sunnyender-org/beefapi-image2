@@ -6,9 +6,20 @@ import {
   MODEL_NANO_BANANA_2,
   MODEL_NANO_BANANA_PRO,
   MODEL_REMOVE_BG,
+  GPT_IMAGE_2_EXACT_SIZES,
   resolveImageRequest,
   rewriteCanvasPixels,
 } from "../scripts/resolve-image-request.mjs";
+
+test("all 34 Leonardo native pairs avoid a false fitting warning", () => {
+  assert.equal(GPT_IMAGE_2_EXACT_SIZES.size, 34);
+  for (const size of GPT_IMAGE_2_EXACT_SIZES) {
+    const plan = resolveImageRequest({ prompt: "cup", size });
+    assert.match(plan.reason, /^native-gpt-image-2/);
+    assert.equal(plan.warning, undefined);
+    assert.equal(plan.size, size);
+  }
+});
 
 test("default request stays on cheap 1K gpt-image-2", () => {
   const plan = resolveImageRequest({ prompt: "一只玻璃小龙虾，白底" });

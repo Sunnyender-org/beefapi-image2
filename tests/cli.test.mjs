@@ -119,6 +119,9 @@ before(async () => {
       response.setHeader("Content-Type", "application/json");
       response.end(
         JSON.stringify({
+          ...(payload.prompt === "server-fitted" ? { metadata: { image_canvas: {
+            source_size: "2x1", delivered_size: "1x1", operation: "pad", fit: "pad", padding: "transparent", upscaled: false,
+          }}} : {}),
           data: [
             payload.prompt === "url-response"
               ? { url: "/v1/images/proxy-test" }
@@ -186,6 +189,18 @@ test("oversized canvas fails before any HTTP request", async () => {
   const beforeCount = requests.length;
   await run(["generate", "--prompt", "cup", "--size", "9000x9000"], { expectStatus: 1 });
   assert.equal(requests.length, beforeCount);
+});
+
+test("server fitting remains fitting after exact-byte verification", async () => {
+  const result = await run(["generate", "--prompt", "server-fitted", "--size", "1x1",
+    "--out", path.join(fixtureRoot, "server-fitted.png")]);
+  const line = result.stdout.split("\n").find(line => line.includes("Verified canvas:"));
+  const metadata = JSON.parse(line.slice(line.indexOf("{") ));
+  assert.equal(metadata.operation, "pad");
+  assert.equal(metadata.source_size, "2x1");
+  assert.equal(metadata.fit, "pad");
+  assert.equal(metadata.padding, "transparent");
+  assert.equal(metadata.verified_size, "1x1");
 });
 
 test("setup validates the model, stores a private credential, and never prints the key", async () => {
