@@ -88,6 +88,7 @@ export function fitImageCanvas(bytes, target, { fit = "pad", format = "png" } = 
   try {
     writeFileSync(input, bytes, { mode: 0o600 });
     const scale = (fit === "crop" ? Math.max : Math.min)(width / source.width, height / source.height);
+    let resizedDimensions;
     const run = (bin, args) => {
       const result = spawnSync(bin, args, { stdio: "ignore", timeout: 60000 });
       if (result.error || result.status !== 0) throw new Error("Local canvas processing failed.");
@@ -95,20 +96,25 @@ export function fitImageCanvas(bytes, target, { fit = "pad", format = "png" } = 
     if (tool === "sips") {
       const longEdge = (fit === "crop" ? Math.ceil : Math.floor)(Math.max(source.width, source.height) * scale);
       run(tool, ["-Z", String(Math.max(1, longEdge)), "-s", "format", format, input, "--out", output]);
+      resizedDimensions = imageDimensions(readFileSync(output));
       run(tool, [fit === "crop" ? "--cropToHeightWidth" : "--padToHeightWidth", String(height), String(width),
         ...(fit === "pad" ? ["--padColor", "FFFFFF"] : []), output]);
     } else {
-      run(tool, [input, "-auto-orient", "-resize", `${width}x${height}${fit === "crop" ? "^" : ""}`,
-        "-background", source.alpha && format !== "jpeg" ? "none" : "white",
+      const resized = path.join(temp, "resized.png");
+      run(tool, [input, "-auto-orient", "-resize", `${width}x${height}${fit === "crop" ? "^" : ""}`, resized]);
+      resizedDimensions = imageDimensions(readFileSync(resized));
+      run(tool, [resized, "-background", source.alpha && format !== "jpeg" ? "none" : "white",
         "-gravity", "center", "-extent", target, output]);
     }
     if (!existsSync(output)) throw new Error("Local canvas output is missing.");
     const fitted = readFileSync(output);
     const actual = imageDimensions(fitted);
     if (!actual || actual.width !== width || actual.height !== height) throw new Error("Local canvas output dimensions do not match.");
-    metadata.operation = source.width * height === source.height * width ? "resize" : fit;
+    if (!resizedDimensions) throw new Error("Cannot verify intermediate resize dimensions.");
+    const canvasChanged = resizedDimensions.width !== width || resizedDimensions.height !== height;
+    metadata.operation = canvasChanged ? fit : "resize";
     metadata.upscaled = scale > 1;
-    if (fit === "pad") metadata.padding = source.alpha ? "transparent" : "white";
+    if (fit === "pad" && canvasChanged) metadata.padding = source.alpha && format !== "jpeg" ? "transparent" : "white";
     return { bytes: fitted, metadata };
   } finally {
     rmSync(temp, { recursive: true, force: true });
