@@ -34,8 +34,9 @@ import {
   UTILITY_MODELS,
   resolveImageRequest,
 } from "./resolve-image-request.mjs";
+import { fitImageCanvas, imageDimensions, localCanvasTool } from "./image-canvas.mjs";
 
-const VERSION = "0.5.2";
+const VERSION = "0.5.3";
 const PRODUCT = "beefapi-codex-image2";
 const MODEL = DEFAULT_MODEL;
 const DEFAULT_BASE_URL = "https://beefapi.com/v1";
@@ -724,6 +725,7 @@ function planImageRequest(options, prompt, operation) {
       background: options.background,
       outputFormat: options["output-format"],
       noResize: Boolean(options["no-resize"]),
+      fit: options.fit,
       operation,
     });
   } catch (error) {
@@ -839,46 +841,37 @@ function actualOutputPath(requested, bytes, force = false) {
   return corrected;
 }
 
-function commandExists(bin) {
-  const result = spawnSync(bin, ["-h"], { encoding: "utf8" });
-  if (result.error?.code === "ENOENT") return false;
-  return true;
+function canvasExtraFields(plan) {
+  return plan.model === MODEL_GPT_IMAGE_2 && plan.fit !== "pad"
+    ? { image_canvas: { fit: plan.fit } } : undefined;
 }
 
-function resizeWithLocalTool(bytes, targetSize, format) {
-  const parsed = String(targetSize).match(/^(\d+)x(\d+)$/);
-  if (!parsed) return { bytes, resized: false };
-  const width = parsed[1];
-  const height = parsed[2];
-  const ext = format === "jpeg" ? "jpg" : format;
-  const tempDir = path.join(os.tmpdir(), `beefapi-image2-resize-${process.pid}`);
-  mkdirSync(tempDir, { recursive: true, mode: 0o700 });
-  const source = path.join(tempDir, `in.${ext}`);
-  const dest = path.join(tempDir, `out.${ext}`);
-  writeFileSync(source, bytes);
-  const attempts = [];
-  if (process.platform === "darwin") {
-    attempts.push({
-      bin: "sips",
-      args: ["-z", height, width, source, "--out", dest],
-    });
+function checkCanvasTools(plan) {
+  if (plan.resize && !localCanvasTool(plan.outputFormat, plan.background === "transparent")) {
+    fail("This target needs local canvas fitting. Install ImageMagick before generating; no quota was consumed.");
   }
-  attempts.push(
-    { bin: "magick", args: [source, "-resize", `${width}x${height}!`, dest] },
-    { bin: "convert", args: [source, "-resize", `${width}x${height}!`, dest] },
-  );
-  try {
-    for (const attempt of attempts) {
-      if (!commandExists(attempt.bin)) continue;
-      const result = spawnSync(attempt.bin, attempt.args, { encoding: "utf8" });
-      if (result.status === 0 && existsSync(dest) && statSync(dest).size > 0) {
-        return { bytes: readFileSync(dest), resized: true, tool: attempt.bin };
-      }
+}
+
+function deliverImage(bytes, plan, out, result, force) {
+  const serverCanvas = result?.metadata?.image_canvas;
+  if (serverCanvas) info(`Server canvas: ${JSON.stringify(serverCanvas)}`);
+  if (plan.requestedSize) {
+    try {
+      const fitted = fitImageCanvas(bytes, plan.requestedSize, { fit: plan.fit, format: plan.outputFormat });
+      bytes = fitted.bytes;
+      info(`Verified canvas: ${JSON.stringify(fitted.metadata)}`);
+    } catch (error) {
+      const extension = path.extname(out);
+      const nativeOut = actualOutputPath(`${out.slice(0, out.length - extension.length)}.native${extension}`, bytes, force);
+      writeImage(nativeOut, bytes, force);
+      fail(`${error.message} Generated original saved to ${nativeOut}; target size is NOT complete. Do not regenerate; fit this saved image after installing the required tool.`);
     }
-    return { bytes, resized: false };
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
+  } else {
+    const actual = imageDimensions(bytes);
+    if (actual) info(`Actual output: ${actual.width}x${actual.height}.`);
   }
+  const actualOut = actualOutputPath(out, bytes, force);
+  writeImage(actualOut, bytes, force);
 }
 
 function describePlan(plan, extra = {}) {
@@ -887,6 +880,7 @@ function describePlan(plan, extra = {}) {
     size: plan.size,
     target_size: plan.targetSize,
     resize: plan.resize,
+    fit: plan.fit,
     reason: plan.reason,
     selected_by: plan.selectedBy,
     warning: plan.warning,
@@ -931,6 +925,7 @@ async function commandGenerate(options) {
     response_format: options["response-format"],
     background: plan.background,
     output_format: plan.outputFormat,
+    extra_fields: canvasExtraFields(plan),
   };
   for (const key of Object.keys(payload)) {
     if (payload[key] === undefined) delete payload[key];
@@ -943,6 +938,7 @@ async function commandGenerate(options) {
     );
     return;
   }
+  checkCanvasTools(plan);
   const credential = resolveCredential();
   const models = await listModels(credential);
   requireModelAccess(models, plan.model);
@@ -953,20 +949,7 @@ async function commandGenerate(options) {
   const result = await callImageApi("/images/generations", payload, credential);
   if (!Array.isArray(result?.data) || !result.data.length)
     fail("Image API returned no images.");
-  let bytes = await imageBytes(result.data[0], credential.baseUrl);
-  if (plan.resize) {
-    const resized = resizeWithLocalTool(bytes, plan.targetSize, plan.outputFormat);
-    if (resized.resized) {
-      bytes = resized.bytes;
-      info(`Resized to ${plan.targetSize} with ${resized.tool}.`);
-    } else {
-      info(
-        `Native output is ${plan.size}; could not locally resize to ${plan.targetSize}. Install ImageMagick, or on macOS use sips.`,
-      );
-    }
-  }
-  const actualOut = actualOutputPath(out, bytes, options.force);
-  writeImage(actualOut, bytes, options.force);
+  deliverImage(await imageBytes(result.data[0], credential.baseUrl), plan, out, result, options.force);
 }
 
 function mimeFor(filePath) {
@@ -1145,6 +1128,7 @@ async function commandEdit(options) {
         response_format: options["response-format"],
         background: plan.background,
         output_format: plan.outputFormat,
+        extra_fields: canvasExtraFields(plan),
         input_fidelity: options["input-fidelity"],
         ...utilityOptionValues(options, plan.model),
       },
@@ -1166,8 +1150,10 @@ async function commandEdit(options) {
     background: plan.background,
     response_format: options["response-format"],
     input_fidelity: options["input-fidelity"],
+    extra_fields: canvasExtraFields(plan) ? JSON.stringify(canvasExtraFields(plan)) : undefined,
     ...utilityOptionValues(options, plan.model),
   };
+  checkCanvasTools(plan);
   const upload = multipartUpload(fields, [
     ...images.map((image) => ({ ...image, field: "image" })),
     ...(mask ? [{ ...mask, field: "mask" }] : []),
@@ -1183,20 +1169,7 @@ async function commandEdit(options) {
   const result = await callImageApi("/images/edits", null, credential, upload);
   if (!Array.isArray(result?.data) || !result.data.length)
     fail("Image API returned no images.");
-  let bytes = await imageBytes(result.data[0], credential.baseUrl);
-  if (plan.resize) {
-    const resized = resizeWithLocalTool(bytes, plan.targetSize, plan.outputFormat);
-    if (resized.resized) {
-      bytes = resized.bytes;
-      info(`Resized to ${plan.targetSize} with ${resized.tool}.`);
-    } else {
-      info(
-        `Native output is ${plan.size}; could not locally resize to ${plan.targetSize}. Install ImageMagick, or on macOS use sips.`,
-      );
-    }
-  }
-  const actualOut = actualOutputPath(out, bytes, options.force);
-  writeImage(actualOut, bytes, options.force);
+  deliverImage(await imageBytes(result.data[0], credential.baseUrl), plan, out, result, options.force);
 }
 
 function isInside(child, parent) {
@@ -1299,6 +1272,7 @@ Image options:
   --output-format png|jpeg|webp
   --response-format b64_json|url
   --no-resize
+  --fit pad|crop|native  (pad preserves content; crop must be explicitly requested)
   --dry-run
   --force
 

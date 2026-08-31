@@ -53,9 +53,9 @@ test("user --model wins over auto firefly", () => {
     model: "gpt-image-2",
   });
   assert.equal(plan.model, MODEL_GPT_IMAGE_2);
-  assert.equal(plan.size, "1024x1024");
+  assert.equal(plan.size, "1440x1440");
   assert.equal(plan.targetSize, "1440x1440");
-  assert.match(plan.warning, /firefly/);
+  assert.match(plan.warning, /canvas/);
 });
 
 test("explicit 1024x1024 stays on gpt-image-2", () => {
@@ -73,20 +73,76 @@ test("2K without a ratio uses firefly square", () => {
   assert.equal(plan.size, "2048x2048");
 });
 
+for (const size of ["1536x1024", "1024x1536", "1536x1536", "2048x1024"]) {
+  for (const operation of ["generate", "edit"]) {
+    test(`${operation} preserves verified exact pixels ${size}`, () => {
+      const prompt = `画一张 ${size} 的蓝色陶瓷杯，背景浅绿`;
+      const plan = resolveImageRequest({ prompt, size, operation });
+      assert.equal(plan.model, MODEL_GPT_IMAGE_2);
+      assert.equal(plan.size, size);
+      assert.equal(plan.prompt, prompt);
+      assert.equal(plan.resize, false);
+      assert.equal(plan.targetSize, null);
+    });
+  }
+}
+
+test("exact pixels do not override an explicit model or target", () => {
+  const firefly = resolveImageRequest({ prompt: "cup", model: "firefly", size: "1536x1536" });
+  assert.equal(firefly.model, MODEL_FIREFLY);
+  assert.equal(firefly.targetSize, "1536x1536");
+  const nano = resolveImageRequest({ prompt: "Nano Banana 2 cup", size: "1536x1536" });
+  assert.equal(nano.model, MODEL_NANO_BANANA_2);
+  const target = resolveImageRequest({ prompt: "cup", size: "2048x1024", targetSize: "1000x500" });
+  assert.equal(target.size, "2048x1024");
+  assert.equal(target.targetSize, "1000x500");
+  assert.equal(target.resize, true);
+});
+
+test("explicit verified pixels win over marketplace size defaults", () => {
+  const plan = resolveImageRequest({ prompt: "淘系主图，1536x1536，logo 200px", size: "1536x1536" });
+  assert.equal(plan.model, MODEL_GPT_IMAGE_2);
+  assert.equal(plan.size, "1536x1536");
+  assert.equal(plan.targetSize, null);
+  assert.equal(plan.resize, false);
+});
+
 test("4K 16:9 uses firefly native 4K", () => {
   const plan = resolveImageRequest({ prompt: "4K 16:9 海报" });
   assert.equal(plan.model, MODEL_FIREFLY);
   assert.equal(plan.size, "3840x2160");
 });
 
-test("explicit firefly native size is passed through", () => {
+test("explicit firefly model preserves its native size", () => {
   const plan = resolveImageRequest({
     prompt: "wide banner",
+    model: "firefly",
     size: "2560x1440",
   });
   assert.equal(plan.model, MODEL_FIREFLY);
   assert.equal(plan.size, "2560x1440");
   assert.equal(plan.resize, false);
+});
+
+for (const size of ["1440x1440", "1280x720", "1920x1088", "1000x333", "3840x2160"]) {
+  test(`arbitrary explicit canvas ${size} stays on the public Image2 model`, () => {
+    const plan = resolveImageRequest({ prompt: `画一张${size}海报`, size });
+    assert.equal(plan.model, MODEL_GPT_IMAGE_2);
+    assert.equal(plan.size, size);
+    assert.equal(plan.requestedSize, size);
+    assert.equal(plan.fit, "pad");
+    assert.equal(plan.resize, false);
+  });
+}
+
+test("canvas fit is explicit, bounded, and native-only is preserved", () => {
+  assert.equal(resolveImageRequest({ prompt: "cup", size: "1000x333", fit: "crop" }).fit, "crop");
+  assert.equal(resolveImageRequest({ prompt: "cup", size: "1000x333", noResize: true }).fit, "native");
+  assert.throws(() => resolveImageRequest({ prompt: "cup", fit: "stretch" }), /fit/);
+  assert.throws(() => resolveImageRequest({ prompt: "cup", size: "999999x999999" }), /16 MP/);
+  assert.throws(() => resolveImageRequest({ prompt: "cup", size: "1536x1536", targetSize: "1000x1000", fit: "native" }), /Native-only/);
+  const nano = resolveImageRequest({ prompt: "cup", model: "nano-banana-2", size: "5504x3072" });
+  assert.equal(nano.size, "5504x3072");
 });
 
 test("rewriteCanvasPixels scales logo hints", () => {

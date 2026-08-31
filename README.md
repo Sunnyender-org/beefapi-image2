@@ -8,6 +8,12 @@ describes the desired result; they do not need to choose a model or provider.
 - Generate images and edit one or more reference images.
 - Remove a background from one input image and return a real transparent asset.
 - Understand 淘系 / 1440 / 1:1 / 3:4 / 9:16 / 2K / 4K size intent.
+- Preserve explicit `1536x1024`, `1024x1536`, `1536x1536`, and `2048x1024`
+  requests on `gpt-image-2` without local resizing (requires the corresponding
+  channel-side dimension update).
+- Deliver other requested pixel canvases through the updated Leonardo channel:
+  use a supported generation, then fit with padding or explicitly requested
+  cropping. No stretching; post-processing and any upscaling are disclosed.
 - Stream up to six reference images instead of loading the whole multipart body
   into memory: 30 MiB per image, 180 MiB combined.
 - Inspect returned image bytes and write the correct `.png`, `.jpg`, `.webp`,

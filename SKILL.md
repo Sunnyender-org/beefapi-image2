@@ -46,16 +46,24 @@ BeefAPI or a model name.
 2. CLI path: `scripts/beefapi-image2.mjs` next to this `SKILL.md`.
 3. Put the user's request in `--prompt` unchanged, including size/ratio words.
    Preserve exact on-image text.
-4. Add `--size` / `--target-size` / `--out` only when the user stated those
-   values. Let natural-language capability selection handle ordinary routing.
+4. When the user states exact output pixels (for example, 2048×1024), always
+   pass `--size 2048x1024` as well as keeping their original prompt. Do not
+   substitute an aspect ratio or a smaller size. Add `--target-size` / `--out`
+   only when the user stated those values. Ratios and 2K/4K words alone remain
+   natural-language routing hints.
+   Output canvas fitting defaults to preserving the whole image with padding.
+   Pass `--fit crop` only when the user explicitly allows cropping; use
+   `--fit native` when they require native pixels with no post-processing.
 5. Dry-run only when parameters or output location are uncertain.
 6. Live run may take a couple of minutes and uses quota. Firefly costs more;
    do not force it unless the request needs 2K/4K, 淘系 1440, or a firefly
    native ratio.
 7. Confirm the output file exists and is a non-empty image. The CLI corrects
    misleading extensions when an upstream returns a different real format.
-8. Return the actual path plus request size and target size. Do not burden the
-   user with internal model names unless they asked.
+8. Return the actual path and verified delivered dimensions. If canvas metadata
+   says pad, crop, resize, or upscaled, state that plainly; padding is not AI
+   outpainting and interpolation is not added detail. Do not call these native
+   generations. Do not burden the user with model names unless they asked.
 
 ## Commands
 
@@ -106,6 +114,9 @@ generation/edit routes; cutout uses `b64_json`.
   `gpt-image-2-firefly`.
 - Network/sandbox denial: say so; do not claim an image was generated.
 - Empty response: keep the error; do not invent an output path.
+- Canvas fitting failure: the CLI preserves a `.native` original and exits with
+  failure. Finish from that saved file after resolving the local tool issue;
+  do not generate again or claim the target dimensions were delivered.
 
 ## Examples that should not trigger
 

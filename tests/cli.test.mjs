@@ -157,6 +157,37 @@ after(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
+test("exact canvas options reach both API routes and output pixels are verified", async () => {
+  const generated = await run(["generate", "--prompt", "cup", "--size", "1x1", "--fit", "pad",
+    "--out", path.join(fixtureRoot, "exact-generated.png")]);
+  assert.match(generated.stdout, /Verified canvas/);
+  const payload = JSON.parse(requests.findLast(r => r.url === "/v1/images/generations").body);
+  assert.equal(payload.extra_fields, undefined, "default fitting must not add provider-specific options");
+  const ref = path.join(fixtureRoot, "canvas-ref.png");
+  writeFileSync(ref, tinyPng);
+  await run(["edit", "--image", ref, "--prompt", "change background", "--size", "1x1", "--fit", "crop",
+    "--out", path.join(fixtureRoot, "exact-edited.png")]);
+  const multipart = requests.findLast(r => r.url === "/v1/images/edits").body.toString();
+  assert.match(multipart, /name="extra_fields"\r\n\r\n\{"image_canvas":\{"fit":"crop"\}\}/);
+});
+
+test("native mismatch saves original, reports failure, and never generates twice", async () => {
+  const beforeCount = requests.filter(r => r.url === "/v1/images/generations").length;
+  const result = await run(["generate", "--prompt", "cup", "--size", "100x100", "--fit", "native",
+    "--out", path.join(fixtureRoot, "mismatch.png")], { expectStatus: 1 });
+  assert.match(result.stderr, /target size is NOT complete/);
+  assert.match(result.stderr, /Do not regenerate/);
+  assert.equal(existsSync(path.join(fixtureRoot, "mismatch.png")), false);
+  assert.deepEqual(readFileSync(path.join(fixtureRoot, "mismatch.native.png")), tinyPng);
+  assert.equal(requests.filter(r => r.url === "/v1/images/generations").length - beforeCount, 1);
+});
+
+test("oversized canvas fails before any HTTP request", async () => {
+  const beforeCount = requests.length;
+  await run(["generate", "--prompt", "cup", "--size", "9000x9000"], { expectStatus: 1 });
+  assert.equal(requests.length, beforeCount);
+});
+
 test("setup validates the model, stores a private credential, and never prints the key", async () => {
   const result = await run(["setup"]);
   assert.doesNotMatch(result.stdout + result.stderr, new RegExp(apiKey));
@@ -217,7 +248,7 @@ test("generate enforces model/n=1 and writes b64_json output", async () => {
     "b64_json",
   ]);
   assert.deepEqual(readFileSync(out), tinyPng);
-  const request = requests.find(
+  const request = requests.findLast(
     (item) => item.url === "/v1/images/generations",
   );
   const payload = JSON.parse(request.body.toString("utf8"));
@@ -298,7 +329,7 @@ test("edit sends multipart image data with fixed model and n=1", async () => {
     out,
   ]);
   assert.deepEqual(readFileSync(out), tinyPng);
-  const request = requests.find((item) => item.url === "/v1/images/edits");
+  const request = requests.findLast((item) => item.url === "/v1/images/edits");
   assert.match(
     request.headers["content-type"],
     /^multipart\/form-data; boundary=/,
@@ -422,7 +453,7 @@ test("dry-run needs no credential and n>1 fails before any network call", async 
     { withKey: false },
   );
   assert.match(forced.stdout, /"model": "gpt-image-2"/);
-  assert.match(forced.stdout, /"size": "1024x1024"/);
+  assert.match(forced.stdout, /"size": "1440x1440"/);
 
   const invalid = await run(["generate", "--prompt", "bad", "--n", "2"], {
     expectStatus: 1,

@@ -59,6 +59,14 @@ export const GPT_IMAGE_2_SIZES = {
   "2:3": "1024x1536",
 };
 
+// Exact consumer-route outputs verified from image bytes, not only API metadata.
+// Keep ratio defaults above unchanged; explicit pixels must not become a resize.
+export const GPT_IMAGE_2_EXACT_SIZES = new Set([
+  ...Object.values(GPT_IMAGE_2_SIZES),
+  "1536x1536",
+  "2048x1024",
+]);
+
 // Leonardo Nano Banana native pixels. Public model names stay provider-neutral;
 // this table is used only when the caller explicitly names a Nano model.
 export const NANO_BANANA_SIZES = {
@@ -233,6 +241,30 @@ function planError(message) {
 }
 
 export function resolveImageRequest(input = {}) {
+  const fit = input.noResize ? "native" : (input.fit || "pad");
+  if (!["pad", "crop", "native"].includes(fit)) throw planError("fit must be pad, crop, or native.");
+  const named = normalizeModel(input.model) || detectNamedModel(input.prompt, input.operation);
+  const nativeNano = [MODEL_NANO_BANANA_2, MODEL_NANO_BANANA_PRO].includes(named)
+    && Object.values(NANO_BANANA_SIZES).some(row => Object.values(row).includes(parseWxH(input.size)?.size));
+  for (const value of [input.size, input.targetSize]) {
+    if (nativeNano && value === input.size) continue;
+    const pixels = parseWxH(value);
+    if (pixels && (Math.max(pixels.width, pixels.height) > 8192 || pixels.width * pixels.height > 16777216)) {
+      throw planError("Output canvas must be at most 8192 pixels per edge and 16 MP.");
+    }
+  }
+  const plan = resolvePlan(input);
+  if (UTILITY_MODELS.has(plan.model)) return plan;
+  if (fit === "native" && plan.resize) throw planError("Native-only output cannot also request a resized target canvas.");
+  return {
+    ...plan,
+    fit,
+    requestedSize: input.noResize ? (parseWxH(input.size)?.size || null)
+      : (plan.targetSize || parseWxH(input.size)?.size || null),
+  };
+}
+
+function resolvePlan(input = {}) {
   const prompt = String(input.prompt || "").trim();
   const quality = String(input.quality || "auto").trim() || "auto";
   const background = input.background
@@ -336,13 +368,16 @@ export function resolveImageRequest(input = {}) {
     selectedModel === MODEL_NANO_BANANA_2 ||
     selectedModel === MODEL_NANO_BANANA_PRO
   ) {
-    const nanoRatio = ratio && NANO_BANANA_SIZES[ratio] ? ratio : "1:1";
-    if (ratio && !NANO_BANANA_SIZES[ratio]) {
+    const nativeNano = Object.entries(NANO_BANANA_SIZES).flatMap(([ratio, tiers]) =>
+      Object.entries(tiers).map(([tier, size]) => ({ ratio, tier, size })))
+      .find(entry => entry.size === explicitSize?.size);
+    const nanoRatio = nativeNano?.ratio || (ratio && NANO_BANANA_SIZES[ratio] ? ratio : "1:1");
+    if (ratio && !nativeNano && !NANO_BANANA_SIZES[ratio]) {
       throw planError(
         `Unsupported Nano Banana ratio ${ratio}. Use one of: ${Object.keys(NANO_BANANA_SIZES).join(", ")}.`,
       );
     }
-    const nanoTier = tier || (explicitSize ? nearestNanoTier(explicitSize) : "1k");
+    const nanoTier = tier || nativeNano?.tier || (explicitSize ? nearestNanoTier(explicitSize) : "1k");
     const nativeSize = NANO_BANANA_SIZES[nanoRatio][nanoTier];
     return finalizePlan({
       model: selectedModel,
@@ -362,9 +397,7 @@ export function resolveImageRequest(input = {}) {
 
   if (
     explicitSize &&
-    GPT_IMAGE_2_SIZES[ratio] === explicitSize.size &&
-    selectedModel !== MODEL_FIREFLY &&
-    !taobao
+    selectedModel !== MODEL_FIREFLY
   ) {
     return finalizePlan({
       model: MODEL_GPT_IMAGE_2,
@@ -374,9 +407,12 @@ export function resolveImageRequest(input = {}) {
       background,
       outputFormat,
       prompt,
-      reason: `native-gpt-image-2-${ratio}`,
+      reason: GPT_IMAGE_2_EXACT_SIZES.has(explicitSize.size)
+        ? `native-gpt-image-2-${ratio}` : "gpt-image-2-output-canvas",
       selectedBy: forcedModel ? "user-model" : "size-table",
       noResize,
+      warning: GPT_IMAGE_2_EXACT_SIZES.has(explicitSize.size) ? undefined
+        : "Exact output pixels requested: the Leonardo channel may fit a supported generation with padding or explicit cropping; this is not a native-size guarantee.",
     });
   }
 
@@ -410,8 +446,8 @@ export function resolveImageRequest(input = {}) {
     if (selectedModel === MODEL_GPT_IMAGE_2) {
       return finalizePlan({
         model: MODEL_GPT_IMAGE_2,
-        size: GPT_IMAGE_2_SIZES[marketplaceRatio] || "1024x1024",
-        targetSize,
+        size: noResize ? (GPT_IMAGE_2_SIZES[marketplaceRatio] || "1024x1024") : targetSize,
+        targetSize: noResize ? null : targetSize,
         quality,
         background,
         outputFormat,
@@ -420,7 +456,7 @@ export function resolveImageRequest(input = {}) {
         selectedBy: "user-model",
         noResize,
         warning:
-          "gpt-image-2 cannot natively output 1440. Use gpt-image-2-firefly for 淘系 sizes.",
+          "The Leonardo channel can fit the requested canvas; this is not a native 1440 generation guarantee.",
       });
     }
     const nativeSize = fireflySize(marketplaceRatio, tier || "2k");
@@ -435,27 +471,6 @@ export function resolveImageRequest(input = {}) {
       reason: `taobao-${marketplaceRatio}-${tier || "2k"}`,
       selectedBy: forcedModel ? "user-model" : "auto",
       noResize,
-    });
-  }
-
-  if (explicitSize && selectedModel === MODEL_GPT_IMAGE_2) {
-    return finalizePlan({
-      model: MODEL_GPT_IMAGE_2,
-      size: explicitSize.size,
-      targetSize: explicitTarget?.size || null,
-      quality,
-      background,
-      outputFormat,
-      prompt,
-      reason: "user-forced-gpt-image-2-size",
-      selectedBy: "user-model",
-      noResize,
-      warning:
-        explicitSize.size !== "1024x1024" &&
-        explicitSize.size !== "1536x1024" &&
-        explicitSize.size !== "1024x1536"
-          ? "gpt-image-2 only reliably honors 1K square/3:2/2:3. Custom square sizes often snap to ~1254."
-          : undefined,
     });
   }
 
