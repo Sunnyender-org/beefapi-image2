@@ -11,6 +11,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install and verify ImageMagick test backend
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y imagemagick
+          node --input-type=module -e 'import {localCanvasTool} from "./scripts/image-canvas.mjs"; if (!localCanvasTool("png", true)) throw new Error("ImageMagick tests must not be skipped");'
       - run: node --test --test-concurrency=1 tests/*.test.mjs
         env:
           FORCE_COLOR: "0"
